@@ -36,6 +36,7 @@
   const loginUrl = new URL('./login.html', url).href;
   const expiredLinkMessage = 'Este link é inválido ou expirou. Solicite outro em “Esqueci minha senha”.';
   const connectionMessage = 'Não foi possível concluir a operação. Verifique a conexão e tente novamente.';
+  let provisional = null;
   let passwordUserId = null;
   let roleRequest = 0;
 
@@ -43,6 +44,8 @@
     const request = ++roleRequest;
     $('userEmail').textContent = user.email || 'Conta autenticada';
     $('userRole').textContent = 'Verificando autorização…';
+    $('leaderTools').classList.add('hidden');
+    $('issuedCode').textContent = '';
     show('logged');
 
     let role = 'Não foi possível confirmar a função';
@@ -55,10 +58,15 @@
     } catch {
       // Keep the status distinct from a confirmed lack of leader access.
     }
-    if (request === roleRequest) $('userRole').textContent = role;
+    if (request === roleRequest) {
+      $('userRole').textContent = role;
+      $('leaderTools').classList.toggle('hidden', role !== 'Líder autorizado');
+    }
   }
 
   function backToLogin() {
+    provisional = null;
+    $('issuedCode').textContent = '';
     passwordUserId = null;
     ++roleRequest;
     $('resetForm').reset();
@@ -85,6 +93,15 @@
   $('loginForm').addEventListener('submit', async event => {
     event.preventDefault();
     await withButton($('loginButton'), async () => {
+      const code = $('password').value.trim();
+      if (/^ADVE-[0-9a-f]{32}$/.test(code)) {
+        provisional = { email: $('email').value.trim(), codigo: code };
+        $('password').value = '';
+        $('resetTitle').textContent = 'Criar minha senha';
+        show('reset');
+        $('newPassword').focus();
+        return;
+      }
       const { data, error } = await api.auth.signInWithPassword({
         email: $('email').value.trim(),
         password: $('password').value
@@ -118,7 +135,7 @@
 
   $('resetForm').addEventListener('submit', async event => {
     event.preventDefault();
-    if (!passwordUserId) return;
+    if (!passwordUserId && !provisional) return;
     const password = $('newPassword').value;
     if (password.length < 12 || password !== $('confirmPassword').value) {
       showMessage('Use pelo menos 12 caracteres e digite a mesma senha nos dois campos.');
@@ -126,6 +143,22 @@
     }
 
     await withButton($('resetButton'), async () => {
+      if (provisional) {
+        const { error } = await api.functions.invoke('trocar-provisoria', {
+          body: { ...provisional, senha: password }
+        });
+        if (error) {
+          const status = error.context?.status;
+          if (status === 403 || status === 409) backToLogin();
+          showMessage(status === 403 ? 'Código inválido ou expirado. Solicite outro.' :
+            status === 409 ? 'A senha não foi salva. Solicite outra provisória.' :
+            status === 400 ? 'Use uma nova senha de 12 a 72 bytes, sem o prefixo ADVE-.' : connectionMessage);
+          return;
+        }
+        backToLogin();
+        showMessage('Senha definida. Entre com sua nova senha.', 'success');
+        return;
+      }
       const { data: { user }, error: sessionError } = await api.auth.getUser();
       if (sessionError || !user || user.id !== passwordUserId) {
         backToLogin();
@@ -143,6 +176,20 @@
       $('resetForm').reset();
       await renderUser(data.user);
       showMessage('Nova senha salva com sucesso.', 'success');
+    });
+  });
+
+  $('issueForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    $('issuedCode').textContent = '';
+    await withButton($('issueButton'), async () => {
+      const { data, error } = await api.rpc('emitir_provisoria', { destino: $('memberEmail').value.trim() });
+      if (error) {
+        showMessage('Confira se o e-mail pertence a um integrante confirmado.');
+        return;
+      }
+      $('issuedCode').textContent = data;
+      showMessage('Entregue o código ao integrante em particular. Validade de 30 minutos.', 'success');
     });
   });
 
