@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#11091d">
 <title>Acesso seguro • Louvor Connect ADVE</title>
 <style>
@@ -13,42 +14,20 @@
 <main class="wrap">
 <header class="brand"><div class="symbol" aria-hidden="true">♫</div><div class="eyebrow">IGREJA ADVE</div><h1>Louvor Connect</h1><p>Acesso individual ao ministério de louvor</p></header>
 <section class="panel" aria-label="Autenticação">
-<div id="loading"><h2>Conectando com segurança…</h2><p class="intro">Verificando a configuração do Supabase.</p></div>
+<div id="loading"><h2>Conectando com segurança…</h2><p class="intro">Verificando sua sessão.</p></div>
 <div id="login" class="hidden">
 <h2>Entrar na minha conta</h2><p class="intro">Use o e-mail e a senha de sua conta. O cadastro é realizado somente por convite do líder.</p>
 <form id="loginForm"><label for="email">E-mail</label><input id="email" type="email" required autocomplete="username" placeholder="seuemail@exemplo.com"><label for="password">Senha</label><input id="password" type="password" required autocomplete="current-password" placeholder="Sua senha"><button class="primary" id="loginButton" type="submit">Entrar</button></form>
 <div class="links"><button id="forgotButton" type="button">Esqueci minha senha</button><a href="./">Voltar ao início</a></div>
 </div>
 <div id="reset" class="hidden"><h2 id="resetTitle">Definir senha</h2><p class="intro">Escolha uma senha exclusiva de pelo menos 12 caracteres. Não compartilhe sua senha com outras pessoas.</p><form id="resetForm"><label for="newPassword">Nova senha</label><input id="newPassword" type="password" minlength="12" required autocomplete="new-password"><label for="confirmPassword">Confirme a nova senha</label><input id="confirmPassword" type="password" minlength="12" required autocomplete="new-password"><button class="primary" id="resetButton" type="submit">Salvar nova senha</button></form></div>
-<div id="logged" class="hidden"><h2>Sessão iniciada</h2><p class="intro">Você entrou no Supabase como:</p><div id="userEmail" class="user-email"></div><div id="userRole" class="pill">Verificando autorização…</div><p class="intro">Esta é a primeira versão da tela de acesso. O painel de administração e as escalas protegidas ainda não estão conectados. Não cadastre dados reais nesta etapa.</p><button class="primary" id="logoutButton" type="button">Sair da minha conta</button><div class="links"><a href="./">Visitar demonstração pública</a></div></div>
+<div id="logged" class="hidden"><h2>Sessão iniciada</h2><div id="userEmail" class="user-email"></div><div id="userRole" class="pill">Verificando autorização…</div><p class="intro">O painel e as escalas estão disponíveis na demonstração pública, com dados de teste salvos no próprio navegador.</p><button class="primary" id="logoutButton" type="button">Sair da minha conta</button><div class="links"><a href="./">Visitar demonstração pública</a></div></div>
 <div id="message" class="hidden" role="status" aria-live="polite"></div>
 </section>
-<footer>🔒 Acesso protegido pelo Supabase Auth. Não há cadastro público nesta página.<br>Louvor Connect ADVE • Versão de integração e testes</footer>
+<footer>Louvor Connect ADVE • Acesso por convite</footer>
 </main>
 <script src="./supabase-config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script>
-(()=>{
-'use strict';
-const $=id=>document.getElementById(id);
-const views=['loading','login','reset','logged'];
-const show=id=>views.forEach(name=>$(name).classList.toggle('hidden',name!==id));
-function msg(text,kind=''){const m=$('message');m.textContent=text;m.className=kind;m.classList.remove('hidden')}
-function clearMsg(){$('message').classList.add('hidden')}
-const cfg=window.LOUVOR_SUPABASE;
-if(!cfg?.url?.startsWith('https://') || !cfg?.publishableKey?.startsWith('sb_publishable_') || !window.supabase?.createClient){show('loading');msg('A conexão não pôde ser iniciada. Confira o arquivo supabase-config.js e sua publicação no GitHub.','error');return}
-const api=window.supabase.createClient(cfg.url,cfg.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-const isRecovery=/type=recovery/.test(location.hash+location.search);
-const isInvite=/type=invite/.test(location.hash+location.search);
-let passwordFlow=isRecovery||isInvite;
-async function renderUser(){clearMsg();const {data:{user},error}=await api.auth.getUser();if(error||!user){show('login');return}if(passwordFlow){show('reset');$('resetTitle').textContent=isRecovery?'Redefinir senha':'Ativar conta — criar senha';return}show('logged');$('userEmail').textContent=user.email||'Conta autenticada';try{const {data,error:e}=await api.from('lideres').select('usuario_id').eq('usuario_id',user.id).maybeSingle();$('userRole').textContent=e?'Não foi possível confirmar a função':data?'Líder autorizado':'Integrante (sem permissão de líder)'}catch{$('userRole').textContent='Não foi possível confirmar a função'}}
-$('loginForm').addEventListener('submit',async e=>{e.preventDefault();clearMsg();$('loginButton').disabled=true;const {error}=await api.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('loginButton').disabled=false;if(error){msg('Não foi possível entrar. Confira o e-mail, a senha e a confirmação da conta.','error');return}await renderUser()});
-$('forgotButton').addEventListener('click',async()=>{clearMsg();const email=$('email').value.trim();if(!email){msg('Digite primeiro seu e-mail no campo acima.');$('email').focus();return}const {error}=await api.auth.resetPasswordForEmail(email,{redirectTo:new URL('login.html',location.href).href});if(error){msg('Não foi possível solicitar a recuperação. Verifique a configuração de e-mail do projeto.','error');return}msg('Se a conta existir e o envio de e-mails estiver configurado, você receberá instruções de recuperação.','success')});
-$('resetForm').addEventListener('submit',async e=>{e.preventDefault();clearMsg();const p=$('newPassword').value;if(p!==$('confirmPassword').value){msg('As senhas digitadas não são iguais.','error');return}if(p.length<12){msg('Use pelo menos 12 caracteres.','error');return}$('resetButton').disabled=true;const {error}=await api.auth.updateUser({password:p});$('resetButton').disabled=false;if(error){msg('Não foi possível salvar a senha. O link pode ter expirado ou a sessão não está ativa.','error');return}passwordFlow=false;history.replaceState({},'',location.pathname);await renderUser();msg('Senha definida com sucesso. Sua conta está autenticada.','success')});
-$('logoutButton').addEventListener('click',async()=>{await api.auth.signOut();passwordFlow=false;show('login');msg('Você saiu da conta.','success')});
-api.auth.onAuthStateChange((event)=>{if(event==='PASSWORD_RECOVERY'){passwordFlow=true;show('reset');$('resetTitle').textContent='Redefinir senha'}if(event==='SIGNED_OUT'&&!passwordFlow)show('login')});
-(async()=>{try{await renderUser()}catch{show('login');msg('Erro ao iniciar a autenticação. Tente recarregar a página.','error')}})();
-})();
-</script>
+<script src="./login.js"></script>
 </body>
 </html>
