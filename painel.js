@@ -6,9 +6,13 @@ const api = window.supabase?.createClient(cfg.url, cfg.publishableKey);
 let user;
 let leader = false;
 let members = [], songs = [], scales = [];
-const cultoDia = inicio => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(inicio));
-const hojeCulto = () => cultoDia(new Date().toISOString());
-const chatAberto = scale => cultoDia(scale.inicio) === hojeCulto();
+const chatAberto = (scale, now = Date.now()) =>
+  Boolean(scale.termino && Date.parse(scale.inicio) <= now && now < Date.parse(scale.termino));
+const localInputValue = value => {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 const chatAcessivel = scale => leader || (scale.integrantes.includes(user.id) && chatAberto(scale));
 function node(tag, value) {
   const el = document.createElement(tag);
@@ -88,6 +92,11 @@ async function load() {
       const audio = node('a','Ouvir música'); audio.href = song.audio;
       audio.target = '_blank'; audio.rel = 'noopener noreferrer'; card.append(audio, node('br'));
     }
+    if (song.trecho) {
+      const trecho = node('details');
+      trecho.append(node('summary', 'Trecho da música'), node('p', song.trecho));
+      card.append(trecho);
+    }
     editButton(card, () => edit(byId('songForm'), song));
   });
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
@@ -97,13 +106,17 @@ async function load() {
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
     if (chatAcessivel(scale)) {
-      const openChat = node('button',chatAberto(scale) ? 'Abrir chat do culto' : 'Ver histórico do chat');
+      const openChat = node('button', 'Abrir chat do culto');
       openChat.onclick = () => { tab('chat'); byId('chatScale').value = scale.id; loadChat().catch(e => notify(e.message)); };
       card.append(openChat);
     }
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
-      inicio: new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,16) }));
+      inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
   });
+  refreshChatChoices();
+  return own;
+}
+function refreshChatChoices() {
   const chatSelect = byId('chatScale');
   const selected = chatSelect.value;
   chatSelect.replaceChildren();
@@ -112,8 +125,6 @@ async function load() {
     option.value = scale.id; chatSelect.append(option);
   }
   if ([...chatSelect.options].some(option => option.value === selected)) chatSelect.value = selected;
-  await loadChat();
-  return own;
 }
 function submit(id, action) {
   const form = byId(id);
@@ -135,16 +146,31 @@ async function save(table, form, data) {
   form.reset(); form.closest('details').open = false;
   await load(); return 'Alterações salvas.';
 }
+let chatRequest = 0;
 async function loadChat() {
+  const request = ++chatRequest;
   const id = byId('chatScale').value;
   const list = byId('chatList'), form = byId('chatForm');
-  list.replaceChildren();
   const scale = scales.find(s => s.id === id);
-  if (!scale) { list.textContent = 'Nenhum culto com chat disponível.'; form.hidden = true; return; }
-  form.hidden = !chatAberto(scale) || (!leader && !scale.integrantes.includes(user.id));
-  const {data,error} = await api.from('mensagens_culto').select('id,autor_id,mensagem,criado_em').eq('escala_id',id).order('criado_em',{ascending:true}).limit(300);
+  if (!scale || !chatAcessivel(scale)) {
+    list.textContent = 'Nenhum culto com chat disponível.';
+    form.hidden = true;
+    return;
+  }
+  form.hidden = !chatAberto(scale);
+  if (list.dataset.scale !== id) list.replaceChildren();
+  list.dataset.scale = id;
+  const {data,error} = await api.from('mensagens_culto').select('id,autor_id,mensagem,criado_em').eq('escala_id',id).order('criado_em',{ascending:false}).order('id',{ascending:false}).limit(300);
+  if (request !== chatRequest) return;
+  if (!chatAcessivel(scale)) {
+    list.textContent = 'O chat deste culto foi encerrado.';
+    form.hidden = true;
+    return;
+  }
   if (error) { list.textContent = 'Não foi possível consultar o chat.'; return; }
+  list.replaceChildren();
   if (!data.length) list.textContent = 'Nenhuma mensagem neste culto.';
+  data.reverse();
   for (const item of data) {
     const author = members.find(m => m.id === item.autor_id)?.nome_completo || 'Integrante';
     const card = node('article');
@@ -158,13 +184,21 @@ submit('chatForm',async(form,values) => {
   const mensagem = String(values.get('mensagem') || '').trim();
   if (!mensagem || mensagem.length > 1000) throw Error('Escreva uma mensagem de até 1000 caracteres.');
   const scale = scales.find(s=>s.id === escala_id);
-  if (!scale || !chatAberto(scale)) throw Error('O chat funciona somente no dia do culto.');
+  if (!scale || !chatAberto(scale) || !chatAcessivel(scale)) throw Error('O chat está fechado para esta escala.');
   const {error} = await api.from('mensagens_culto').insert({escala_id,mensagem});
   if (error) throw Error('Não foi possível enviar a mensagem. Confira sua escala e tente novamente.');
   form.reset(); await loadChat(); return 'Mensagem enviada.';
 });
-submit('scaleForm',(form, values) => save('escalas',form,{ ...Object.fromEntries(values),
-  inicio: new Date(values.get('inicio')).toISOString(), integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas') }));
+submit('scaleForm', (form, values) => {
+  const inicio = new Date(values.get('inicio'));
+  const termino = values.get('termino') ? new Date(values.get('termino')) : null;
+  if (termino && termino <= inicio) throw Error('O término precisa ser depois do início do culto.');
+  return save('escalas', form, {
+    ...Object.fromEntries(values), inicio: inicio.toISOString(),
+    termino: termino?.toISOString() ?? null,
+    integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas')
+  });
+});
 submit('songForm',(form, values) => save('repertorio', form, Object.fromEntries(values)));
 submit('profileForm',async (form, values) => {
   const { error } = await api.rpc('salvar_meu_cadastro',Object.fromEntries(values));
@@ -209,6 +243,16 @@ async function start() {
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
   const own = await load();
+  const refreshChat = () => {
+    if (!document.hidden && !byId('chat').hidden) {
+      refreshChatChoices();
+      loadChat().catch(error => notify(error.message));
+    }
+  };
+  byId('chat').querySelector('form').hidden = true;
+  document.querySelector('[data-tab="chat"]').addEventListener('click', refreshChat);
+  document.addEventListener('visibilitychange', refreshChat);
+  setInterval(refreshChat, 5000);
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
