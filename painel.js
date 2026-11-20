@@ -113,6 +113,7 @@ async function load() {
   }
   if ([...chatSelect.options].some(option => option.value === selected)) chatSelect.value = selected;
   await loadChat();
+  await loadNotifications();
   return own;
 }
 function submit(id, action) {
@@ -134,6 +135,37 @@ async function save(table, form, data) {
   if (error) throw Error('Falha ao salvar. Confira os campos e sua permissão.');
   form.reset(); form.closest('details').open = false;
   await load(); return 'Alterações salvas.';
+}
+async function loadNotifications() {
+  const list = byId('notificationList');
+  const {data,error} = await api.from('notificacoes_escala')
+    .select('id,tipo,titulo,escala_inicio,criado_em,lida_em')
+    .order('criado_em',{ascending:false}).limit(100);
+  if (error) { list.replaceChildren(node('p','Não foi possível carregar seus avisos.')); return; }
+  const unread = data.filter(item => !item.lida_em).length;
+  const badge = byId('unreadCount');
+  badge.hidden = unread === 0;
+  badge.textContent = unread ? '(' + unread + ')' : '';
+  list.replaceChildren();
+  if (!data.length) { list.append(node('p','Você ainda não recebeu avisos de escalas.')); return; }
+  for (const item of data) {
+    const card = node('article');
+    card.append(node('h3',item.tipo === 'escala_criada' ? '📅 Nova escala criada' : '🎶 Você foi adicionado a uma escala'));
+    card.append(node('p',item.titulo + '\n' + new Date(item.escala_inicio).toLocaleString('pt-BR',{dateStyle:'long',timeStyle:'short'})));
+    card.append(node('small','Aviso enviado em ' + new Date(item.criado_em).toLocaleString('pt-BR')));
+    if (!item.lida_em) {
+      const button = node('button','Marcar como lida');
+      button.onclick = async () => {
+        button.disabled = true;
+        const {error} = await api.from('notificacoes_escala')
+          .update({lida_em:new Date().toISOString()}).eq('id',item.id).is('lida_em',null);
+        if (error) { notify('Não foi possível marcar o aviso como lido.'); button.disabled = false; }
+        else await loadNotifications();
+      };
+      card.append(node('p','Não lida'),button);
+    }
+    list.append(card);
+  }
 }
 async function loadChat() {
   const id = byId('chatScale').value;
@@ -212,5 +244,10 @@ async function start() {
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
+  // Atualiza enquanto a página está aberta; não é push em segundo plano.
+  setInterval(() => { if (document.visibilityState === 'visible') loadNotifications().catch(() => {}); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadNotifications().catch(() => {});
+  });
 }
 start().catch(e => notify(e.message));
