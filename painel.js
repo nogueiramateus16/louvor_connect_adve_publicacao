@@ -188,8 +188,8 @@ async function loadNotifications() {
   if (!data.length) { list.append(node('p','Você ainda não recebeu avisos de escalas.')); return; }
   for (const item of data) {
     const card = node('article');
-    card.append(node('h3',item.tipo === 'escala_criada' ? '📅 Nova escala criada' : '🎶 Você foi adicionado a uma escala'));
-    card.append(node('p',item.titulo + '\n' + new Date(item.escala_inicio).toLocaleString('pt-BR',{dateStyle:'long',timeStyle:'short'})));
+    card.append(node('h3',({escala_criada:'📅 Nova escala criada',adicionado_escala:'🎶 Você foi adicionado a uma escala',lembrete_escala:'⏰ Lembrete de escala',aniversario:'🎂 Aniversariante do dia'})[item.tipo] || '🔔 Aviso'));
+    card.append(node('p',item.tipo === 'aniversario' ? item.titulo + ' 🎉' : item.titulo + '\n' + new Date(item.escala_inicio).toLocaleString('pt-BR',{dateStyle:'long',timeStyle:'short'})));
     card.append(node('small','Aviso enviado em ' + new Date(item.criado_em).toLocaleString('pt-BR')));
     if (!item.lida_em) {
       const button = node('button','Marcar como lida');
