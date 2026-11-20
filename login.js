@@ -66,6 +66,7 @@
 
   function backToLogin() {
     provisional = null;
+    $('inviteProfile').hidden = $('inviteProfile').disabled = true;
     $('issuedCode').textContent = '';
     passwordUserId = null;
     ++roleRequest;
@@ -165,6 +166,16 @@
         showMessage(expiredLinkMessage);
         return;
       }
+      if (!$('inviteProfile').disabled) {
+        const { error: profileError } = await api.rpc('salvar_meu_cadastro', {
+          nome: $('fullName').value.trim(), contato: $('profilePhone').value.trim(),
+          nascimento: $('birthday').value, email_informado: $('profileEmail').value.trim()
+        });
+        if (profileError) {
+          showMessage('Confira o nome, o telefone com DDD, a data de nascimento e o e-mail usado no convite.');
+          return;
+        }
+      }
       const { data, error } = await api.auth.updateUser({ password });
       if (error) {
         showMessage(error.code === 'same_password' ? 'Escolha uma senha diferente da anterior.' :
@@ -236,7 +247,14 @@
         passwordUserId = user.id;
         $('resetTitle').textContent = linkType === 'invite' ? 'Ativar conta e criar senha' : 'Redefinir senha';
         show('reset');
-        $('newPassword').focus();
+        if (linkType === 'invite') {
+          $('inviteProfile').hidden = $('inviteProfile').disabled = false;
+          $('profileEmail').value = user.email;
+          $('birthday').max = new Date().toLocaleDateString('en-CA');
+          $('fullName').focus();
+        } else {
+          $('newPassword').focus();
+        }
         return;
       }
       await renderUser(user);
