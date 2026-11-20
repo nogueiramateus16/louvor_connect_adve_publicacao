@@ -24,6 +24,7 @@ function tab(id) {
     byId(button.dataset.tab).hidden = !active;
     button.setAttribute('aria-pressed', active);
   }
+  if (id === 'chat') void refreshChat();
   if (id === 'notices') {
     renderNotices();
     void loadNotices();
@@ -120,6 +121,7 @@ async function load() {
   }
   cards('songList', songs, 'Nenhuma música cadastrada.', (song, card) => {
     card.append(node('h3',song.titulo),node('p',[song.artista,song.tom,song.notas].filter(Boolean).join(' · ')));
+    if (song.trecho) card.append(node('blockquote', song.trecho));
     if (/^https?:\/\//i.test(song.cifra)) {
       const link = node('a','Abrir cifra'); link.href = song.cifra;
       link.target = '_blank'; link.rel = 'noopener noreferrer'; card.append(link, node('br'));
@@ -132,9 +134,21 @@ async function load() {
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
+    const chat = node('button', 'Abrir chat do culto');
+    chat.onclick = () => { byId('chatScale').value = scale.id; tab('chat'); };
+    card.append(chat);
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
-      inicio: new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,16) }));
+      inicio: localDateTime(scale.inicio), termino: localDateTime(scale.termino) }));
   });
+  const chooser = byId('chatScale');
+  const previous = chooser.value;
+  chooser.replaceChildren();
+  for (const scale of [...scales].reverse()) {
+    const option = node('option', scale.titulo + ' · ' + new Date(scale.inicio).toLocaleDateString('pt-BR'));
+    option.value = scale.id;
+    chooser.append(option);
+  }
+  if (scales.some(scale => scale.id === previous)) chooser.value = previous;
   return own;
 }
 function submit(id, action) {
@@ -160,8 +174,24 @@ async function save(table, form, data) {
 for (const form of [byId('scaleForm'), byId('songForm')]) {
   form.addEventListener('reset', () => { form.elements.id.value = ''; });
 }
-submit('scaleForm',(form, values) => save('escalas',form,{ ...Object.fromEntries(values),
-  inicio: new Date(values.get('inicio')).toISOString(), integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas') }));
+function localDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
+}
+submit('scaleForm', (form, values) => {
+  const original = scales.find(scale => scale.id === values.get('id'));
+  const originalStart = original && localDateTime(original.inicio) === values.get('inicio');
+  const originalEnd = original && localDateTime(original.termino) === values.get('termino');
+  const inicio = new Date(originalStart ? original.inicio : values.get('inicio'));
+  const termino = values.get('termino') ? new Date(originalEnd ? original.termino : values.get('termino')) : null;
+  if (termino && (termino <= inicio || termino - inicio > 86400000)) {
+    throw Error('O término precisa ficar até 24 horas depois do início.');
+  }
+  return save('escalas', form, { ...Object.fromEntries(values), inicio: inicio.toISOString(),
+    termino: termino?.toISOString() || null, integrantes: values.getAll('integrantes'),
+    musicas: values.getAll('musicas') });
+});
 submit('songForm',(form, values) => save('repertorio', form, Object.fromEntries(values)));
 submit('profileForm',async (form, values) => {
   const { error } = await api.rpc('salvar_meu_cadastro',Object.fromEntries(values));
@@ -192,6 +222,91 @@ submit('inviteForm',async (form, values, button) => {
   }
   form.reset(); return data.message;
 });
+let chatRequest = 0;
+let chatVersion;
+let oldestMessage;
+function appendChatMessage(item, card) {
+  card.append(node('h3', item.autor + ' · ' + new Date(item.criado_em).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})),
+    node('p', item.mensagem));
+}
+byId('olderChat').onclick = async () => {
+  const button = byId('olderChat');
+  const culto = byId('chatScale').value;
+  const version = chatVersion;
+  button.disabled = true;
+  try {
+    const { data, error } = await api.rpc('ler_chat_do_culto', { culto, antes_de: oldestMessage }).maybeSingle();
+    if (version !== chatVersion || culto !== byId('chatScale').value) return;
+    if (error) throw error;
+    const rows = data?.mensagens || [];
+    const fragment = document.createDocumentFragment();
+    for (const item of rows) {
+      const card = node('article');
+      appendChatMessage(item, card);
+      fragment.append(card);
+    }
+    byId('chatMessages').prepend(fragment);
+    oldestMessage = rows[0]?.id;
+    button.hidden = rows.length < 100;
+  } catch {
+    notify('Não foi possível carregar as mensagens anteriores.');
+  } finally {
+    button.disabled = false;
+  }
+};
+async function refreshChat() {
+  const request = ++chatRequest;
+  const culto = byId('chatScale').value;
+  const form = byId('chatForm');
+  const state = byId('chatState');
+  const older = byId('olderChat');
+  if (!culto) {
+    form.hidden = older.hidden = true;
+    chatVersion = null;
+    state.textContent = 'Nenhuma escala disponível.';
+    byId('chatMessages').replaceChildren();
+    return;
+  }
+  if (chatVersion?.[0] !== culto) {
+    form.hidden = older.hidden = true;
+    form.reset();
+    byId('chatMessages').replaceChildren();
+    state.textContent = 'Carregando chat…';
+  }
+  try {
+    const { data, error } = await api.rpc('ler_chat_do_culto', { culto }).maybeSingle();
+    if (request !== chatRequest) return;
+    if (error) throw error;
+    form.hidden = !data?.aberto;
+    state.textContent = data?.aberto ? 'Chat aberto' :
+      leader ? 'Chat fechado. Histórico disponível para a liderança.' : 'O chat abre no dia do culto e fecha no horário de término.';
+    const rows = data?.mensagens || [];
+    const version = [culto, ...rows.map(item => item.id)].join(',');
+    if (chatVersion?.[1] !== version) {
+      cards('chatMessages', rows, data?.aberto || leader ? 'Nenhuma mensagem.' : '', appendChatMessage);
+      oldestMessage = rows[0]?.id;
+      older.hidden = !leader || rows.length < 100;
+      chatVersion = [culto, version];
+    }
+  } catch {
+    if (request !== chatRequest) return;
+    form.hidden = older.hidden = true;
+    byId('chatMessages').replaceChildren();
+    chatVersion = null;
+    state.textContent = 'Chat indisponível. Tente novamente em instantes.';
+  }
+}
+byId('chatScale').onchange = () => void refreshChat();
+submit('chatForm', async (form, values) => {
+  const culto = byId('chatScale').value;
+  const mensagem = values.get('mensagem').trim();
+  if (!mensagem) throw Error('Digite uma mensagem.');
+  const { error } = await api.from('chat_do_culto').insert({ escala_id: culto, mensagem });
+  await refreshChat();
+  if (error) throw Error('Não foi possível enviar. Confira se o chat ainda está aberto.');
+  form.reset();
+  return 'Mensagem enviada.';
+});
 async function start() {
   if (!api) throw Error('Conexão indisponível. Recarregue a página.');
   api.auth.onAuthStateChange((event,session) => {
@@ -214,6 +329,12 @@ async function start() {
   notify('');
   void loadNotices();
   window.setInterval(() => { if (!document.hidden) void loadNotices(); }, 60000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) void loadNotices(); });
+  window.setInterval(() => { if (!document.hidden && selectedTab === 'chat') void refreshChat(); }, 8000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      void loadNotices();
+      if (selectedTab === 'chat') void refreshChat();
+    }
+  });
 }
 start().catch(e => notify(e.message));
