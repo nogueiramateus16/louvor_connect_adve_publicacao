@@ -1,0 +1,23 @@
+name: Validar Louvor Connect
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verificar JavaScript
+        run: |
+          find . -type f -name '*.js' -not -path './node_modules/*' -print0 | xargs -0 -r -n1 node --check
+      - name: Verificar arquivos essenciais
+        run: |
+          test -f index.html
+          test -f login.html
+          test -f supabase-config.js
+      - name: Aviso sobre banco de dados
+        run: echo "Migrações SQL e Edge Functions precisam de implantação e testes separados no Supabase."
