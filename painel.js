@@ -112,12 +112,25 @@ async function load() {
       for (const [status,label] of [['confirmado','Confirmar presença'],['ausente','Não poderei ir']]) {
         const button = node('button',label); button.disabled = myStatus === status;
         button.onclick = async () => {
-          button.disabled = true;
-          const {error} = await api.from('confirmacoes_escala').upsert({
-            escala_id:scale.id,integrante_id:user.id,status
-          },{onConflict:'escala_id,integrante_id'});
-          if (error) { notify('Não foi possível atualizar sua presença.'); button.disabled = false; return; }
-          await load(); notify('Resposta de presença registrada.');
+          for (const option of buttons.children) option.disabled = true;
+          let saved = false;
+          try {
+            const { error } = await api.from('confirmacoes_escala').upsert({
+              escala_id: scale.id, integrante_id: user.id, status
+            }, { onConflict: 'escala_id,integrante_id' });
+            if (error) throw error;
+            saved = true;
+            await load();
+            notify('Resposta de presença registrada.');
+          } catch {
+            notify(saved
+              ? 'Resposta registrada. Atualize a página para consultar a presença.'
+              : 'Não foi possível atualizar sua presença. Tente novamente.');
+          } finally {
+            for (const [index, option] of [...buttons.children].entries()) {
+              option.disabled = (saved ? status : myStatus) === ['confirmado', 'ausente'][index];
+            }
+          }
         };
         buttons.append(button);
       }
@@ -164,13 +177,15 @@ function renderLeaderDashboard() {
   stats.append(node('p',members.length + ' integrantes • ' + songs.length + ' músicas • ' + scales.length + ' escalas'));
   const list = byId('leaderAttendance'); list.replaceChildren();
   for (const scale of scales) {
-    const records = confirmations.filter(c=>c.escala_id===scale.id);
-    const yes = records.filter(c=>c.status==='confirmado').length;
-    const no = records.filter(c=>c.status==='ausente').length;
-    const pending = scale.integrantes.length - yes - no;
+    const assigned = new Set(scale.integrantes);
+    const records = confirmations.filter(record =>
+      record.escala_id === scale.id && assigned.has(record.integrante_id));
+    const yes = records.filter(record => record.status === 'confirmado').length;
+    const no = records.filter(record => record.status === 'ausente').length;
+    const pending = assigned.size - yes - no;
     const card = node('article');
     card.append(node('h3',scale.titulo),node('p',new Date(scale.inicio).toLocaleString('pt-BR')),
-      node('p','Confirmados: '+yes+' • Ausentes: '+no+' • Pendentes: '+Math.max(0,pending)));
+      node('p','Confirmados: '+yes+' • Ausentes: '+no+' • Pendentes: '+pending));
     list.append(card);
   }
 }

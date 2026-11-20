@@ -46,9 +46,6 @@ create table public.aniversarios_avisados (
 );
 alter table public.aniversarios_avisados enable row level security;
 revoke all on public.aniversarios_avisados from public,anon,authenticated;
-create unique index notificacoes_aniversario_unico
- on public.notificacoes_escala(destinatario_id,tipo,titulo,escala_inicio)
- where tipo='aniversario';
 create function public.gerar_avisos_aniversario()
 returns void language plpgsql security definer set search_path='' as $$
 declare dia date := (now() at time zone 'America/Sao_Paulo')::date;
@@ -62,7 +59,7 @@ begin
    on conflict do nothing returning integrante_id
  )
  insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
- select distinct equipe.id,null::uuid,'aniversario','Aniversário de ' || split_part(trim(m.nome_completo),' ',1),now()
+ select equipe.id,null::uuid,'aniversario','Aniversário de ' || split_part(trim(m.nome_completo),' ',1),now()
  from aniversariantes a
  join public.musicos m on m.id=a.integrante_id
  cross join public.musicos equipe;
