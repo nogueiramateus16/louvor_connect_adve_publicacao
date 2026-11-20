@@ -5,7 +5,7 @@ const cfg = window.LOUVOR_SUPABASE;
 const api = window.supabase?.createClient(cfg.url, cfg.publishableKey);
 let user;
 let leader = false;
-let members = [], songs = [], scales = [];
+let members = [], songs = [], scales = [], confirmations = [];
 const cultoDia = inicio => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(inicio));
 const hojeCulto = () => cultoDia(new Date().toISOString());
 const chatAberto = scale => cultoDia(scale.inicio) === hojeCulto();
@@ -64,6 +64,10 @@ async function load() {
   ]);
   if (results.some(result => result.error)) throw Error('Não foi possível carregar os dados do painel. Atualize a página para tentar novamente.');
   [members, songs, scales] = results.map(result => result.data);
+  const attendance = await api.from('confirmacoes_escala').select('escala_id,integrante_id,status,atualizado_em');
+  if (attendance.error) throw Error('Não foi possível consultar as confirmações de presença.');
+  confirmations = attendance.data;
+  renderLeaderDashboard();
   const own = members.find(m => m.id === user.id);
   const profile = byId('profileForm').elements;
   profile.nome.value = own?.nome_completo || '';
@@ -101,6 +105,24 @@ async function load() {
       openChat.onclick = () => { tab('chat'); byId('chatScale').value = scale.id; loadChat().catch(e => notify(e.message)); };
       card.append(openChat);
     }
+    if (scale.integrantes.includes(user.id)) {
+      const myStatus = confirmations.find(c => c.escala_id === scale.id && c.integrante_id === user.id)?.status;
+      card.append(node('p','Sua presença: ' + (myStatus === 'confirmado' ? 'Confirmada' : myStatus === 'ausente' ? 'Não poderei comparecer' : 'Aguardando confirmação')));
+      const buttons = node('div'); buttons.className = 'actions';
+      for (const [status,label] of [['confirmado','Confirmar presença'],['ausente','Não poderei ir']]) {
+        const button = node('button',label); button.disabled = myStatus === status;
+        button.onclick = async () => {
+          button.disabled = true;
+          const {error} = await api.from('confirmacoes_escala').upsert({
+            escala_id:scale.id,integrante_id:user.id,status
+          },{onConflict:'escala_id,integrante_id'});
+          if (error) { notify('Não foi possível atualizar sua presença.'); button.disabled = false; return; }
+          await load(); notify('Resposta de presença registrada.');
+        };
+        buttons.append(button);
+      }
+      card.append(buttons);
+    }
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
       inicio: new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,16) }));
   });
@@ -135,6 +157,22 @@ async function save(table, form, data) {
   if (error) throw Error('Falha ao salvar. Confira os campos e sua permissão.');
   form.reset(); form.closest('details').open = false;
   await load(); return 'Alterações salvas.';
+}
+function renderLeaderDashboard() {
+  if (!leader) return;
+  const stats = byId('leaderStats'); stats.replaceChildren();
+  stats.append(node('p',members.length + ' integrantes • ' + songs.length + ' músicas • ' + scales.length + ' escalas'));
+  const list = byId('leaderAttendance'); list.replaceChildren();
+  for (const scale of scales) {
+    const records = confirmations.filter(c=>c.escala_id===scale.id);
+    const yes = records.filter(c=>c.status==='confirmado').length;
+    const no = records.filter(c=>c.status==='ausente').length;
+    const pending = scale.integrantes.length - yes - no;
+    const card = node('article');
+    card.append(node('h3',scale.titulo),node('p',new Date(scale.inicio).toLocaleString('pt-BR')),
+      node('p','Confirmados: '+yes+' • Ausentes: '+no+' • Pendentes: '+Math.max(0,pending)));
+    list.append(card);
+  }
 }
 async function loadNotifications() {
   const list = byId('notificationList');
