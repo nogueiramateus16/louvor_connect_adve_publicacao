@@ -22,9 +22,20 @@ Deno.serve(async req => {
     const role = await db.from("lideres").select("usuario_id").eq("usuario_id", data.user.id).maybeSingle();
     if (role.error) return reply(503, "Falha ao consultar a permissão.");
     if (!role.data) return reply(403, "Acesso exclusivo do líder.");
-    const { email } = await req.json();
+    const { email, envio } = await req.json();
     if (typeof email !== "string" || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return reply(400, "Confira o e-mail do integrante.");
+    }
+    if (envio === "manual") {
+      const generated = await db.auth.admin.generateLink({
+        type: "invite", email: email.trim(),
+        options: { redirectTo: site + "/louvor_connect_adve_publicacao/login.html" }
+      });
+      if (generated.error || !generated.data.properties?.action_link) {
+        return reply(409, "Não foi possível gerar o convite. Confira se a conta já existe.");
+      }
+      return Response.json({ message: "Convite pronto. Abra o e-mail preparado e toque em enviar.",
+        link: generated.data.properties.action_link }, { headers });
     }
     const invite = await db.auth.admin.inviteUserByEmail(email.trim(), {
       redirectTo: site + "/louvor_connect_adve_publicacao/login.html"

@@ -97,11 +97,11 @@ function submit(id, action) {
   const form = byId(id);
   form.onsubmit = async event => {
     event.preventDefault();
-    const button = form.querySelector('[type=submit]');
-    button.disabled = true;
-    try { notify(await action(form,new FormData(form))); }
+    const buttons = [...form.querySelectorAll('[type=submit]')];
+    buttons.forEach(b => { b.disabled = true; });
+    try { notify(await action(form,new FormData(form),event.submitter)); }
     catch (e) { notify(e.message || 'Operação indisponível. Tente novamente.'); }
-    finally { button.disabled = false; }
+    finally { buttons.forEach(b => { b.disabled = false; }); }
   };
 }
 async function save(table, form, data) {
@@ -121,12 +121,27 @@ submit('profileForm',async (form, values) => {
   if (error) throw Error('Confira os dados e use o e-mail da sua conta.');
   await load(); return 'Cadastro salvo.';
 });
-submit('inviteForm',async (form, values) => {
-  const { data, error } = await api.functions.invoke('convidar-musico',{ body:{ email: values.get('email').trim() } });
+let currentInvite = '';
+byId('copyInvite').onclick = async () => {
+  try { await navigator.clipboard.writeText(currentInvite); notify('Link individual copiado.'); }
+  catch { notify('Abra o e-mail preparado para enviar o convite.'); }
+};
+submit('inviteForm',async (form, values, button) => {
+  currentInvite = '';
+  byId('delivery').hidden = true;
+  byId('compose').removeAttribute('href');
+  const email = values.get('email').trim();
+  const { data, error } = await api.functions.invoke('convidar-musico',{ body:{ email, envio: button?.value || 'manual' } });
   if (error) {
     let message;
     try { message = (await error.context.json()).message; } catch {}
     throw Error(message || 'Falha ao enviar o convite. Verifique o serviço de e-mail.');
+  }
+  if (data.link) {
+    currentInvite = data.link;
+    const body = 'Olá! Você foi convidado(a) para o Louvor Connect ADVE. Abra seu link individual, preencha o cadastro e crie sua senha.\n\n' + currentInvite;
+    byId('compose').href = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent('Convite individual • Louvor Connect ADVE') + '&body=' + encodeURIComponent(body);
+    byId('delivery').hidden = false;
   }
   form.reset(); return data.message;
 });
