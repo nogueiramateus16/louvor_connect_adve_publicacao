@@ -4,6 +4,10 @@ const notify = message => { byId('status').textContent = message; };
 const cfg = window.LOUVOR_SUPABASE;
 const api = window.supabase?.createClient(cfg.url, cfg.publishableKey);
 let user;
+let birthdayNotices = [];
+let noticesLoaded = false;
+let selectedTab;
+let loadingNotices = false;
 let leader = false;
 let members = [], songs = [], scales = [];
 function node(tag, value) {
@@ -12,10 +16,17 @@ function node(tag, value) {
   return el;
 }
 function tab(id) {
+  const button = document.querySelector('[data-tab="' + id + '"]');
+  if (!button || button.hidden) return;
+  selectedTab = id;
   for (const button of document.querySelectorAll('[data-tab]')) {
     const active = button.dataset.tab === id;
     byId(button.dataset.tab).hidden = !active;
     button.setAttribute('aria-pressed', active);
+  }
+  if (id === 'notices') {
+    renderNotices();
+    void loadNotices();
   }
 }
 function choices(id, rows, label, name) {
@@ -45,6 +56,39 @@ function cards(id, rows, empty, describe) {
   for (const row of rows) {
     const card = node('article');
     describe(row, card); list.append(card);
+  }
+}
+function readNoticeIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('louvor-avisos:' + user.id) || '[]')); }
+  catch { return new Set(); }
+}
+function renderNotices() {
+  if (!noticesLoaded) return;
+  const button = document.querySelector('[data-tab="notices"]');
+  const read = readNoticeIds();
+  const unread = birthdayNotices.filter(item => !read.has(item.id)).length;
+  button.textContent = unread && selectedTab !== 'notices' ? 'Notificações (' + unread + ')' : 'Notificações';
+  if (selectedTab !== 'notices') return;
+  cards('noticeList', birthdayNotices, 'Nenhum aniversário nos últimos sete dias.', (item, card) => {
+    const date = item.dia.split('-').reverse().join('/');
+    card.append(node('h3', 'Aniversário · ' + date), node('p', item.mensagem));
+  });
+  try { localStorage.setItem('louvor-avisos:' + user.id, JSON.stringify(birthdayNotices.map(item => item.id))); }
+  catch { /* The inbox remains available without local storage. */ }
+}
+async function loadNotices() {
+  if (loadingNotices || !user) return;
+  loadingNotices = true;
+  try {
+    const { data, error } = await api.rpc('avisos_de_aniversario');
+    if (error) throw error;
+    birthdayNotices = data;
+    noticesLoaded = true;
+    renderNotices();
+  } catch {
+    if (!noticesLoaded) byId('noticeList').textContent = 'Avisos indisponíveis nesta tentativa. Abra a aba novamente para atualizar.';
+  } finally {
+    loadingNotices = false;
   }
 }
 function editButton(card, fn) {
@@ -113,6 +157,9 @@ async function save(table, form, data) {
   form.reset(); form.closest('details').open = false;
   await load(); return 'Alterações salvas.';
 }
+for (const form of [byId('scaleForm'), byId('songForm')]) {
+  form.addEventListener('reset', () => { form.elements.id.value = ''; });
+}
 submit('scaleForm',(form, values) => save('escalas',form,{ ...Object.fromEntries(values),
   inicio: new Date(values.get('inicio')).toISOString(), integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas') }));
 submit('songForm',(form, values) => save('repertorio', form, Object.fromEntries(values)));
@@ -156,11 +203,17 @@ async function start() {
   const role = await api.from('lideres').select('usuario_id').eq('usuario_id',user.id).maybeSingle();
   if (role.error) throw Error('Falha ao verificar a função da conta.');
   leader = Boolean(role.data);
+  byId('accountRole').textContent = user.email + ' · ' + (leader ? 'Líder' : 'Integrante');
+  byId('accountRole').hidden = false;
+  byId('scaleHint').hidden = leader;
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
   const own = await load();
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
+  void loadNotices();
+  window.setInterval(() => { if (!document.hidden) void loadNotices(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void loadNotices(); });
 }
 start().catch(e => notify(e.message));
