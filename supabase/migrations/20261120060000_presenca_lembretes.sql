@@ -20,6 +20,7 @@ create function public.confirmacoes_timestamp() returns trigger language plpgsql
 begin new.atualizado_em=now(); return new; end $$;
 create trigger confirmacoes_timestamp before update on public.confirmacoes_escala
 for each row execute function public.confirmacoes_timestamp();
+alter table public.notificacoes_escala alter column escala_id drop not null;
 -- Um único lembrete por escala e integrante, mesmo que a rotina rode mais de uma vez.
 alter table public.notificacoes_escala drop constraint if exists notificacoes_escala_tipo_check;
 alter table public.notificacoes_escala add constraint notificacoes_escala_tipo_check
@@ -45,6 +46,9 @@ create table public.aniversarios_avisados (
 );
 alter table public.aniversarios_avisados enable row level security;
 revoke all on public.aniversarios_avisados from public,anon,authenticated;
+create unique index notificacoes_aniversario_unico
+ on public.notificacoes_escala(destinatario_id,tipo,titulo,escala_inicio)
+ where tipo='aniversario';
 create function public.gerar_avisos_aniversario()
 returns void language plpgsql security definer set search_path='' as $$
 declare dia date := (now() at time zone 'America/Sao_Paulo')::date;
@@ -58,11 +62,10 @@ begin
    on conflict do nothing returning integrante_id
  )
  insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
- select distinct equipe.id,esc.id,'aniversario','Aniversário de ' || split_part(trim(m.nome_completo),' ',1),now()
+ select distinct equipe.id,null::uuid,'aniversario','Aniversário de ' || split_part(trim(m.nome_completo),' ',1),now()
  from aniversariantes a
  join public.musicos m on m.id=a.integrante_id
- cross join public.musicos equipe
- join lateral (select id from public.escalas order by inicio desc limit 1) esc on true;
+ cross join public.musicos equipe;
 end $$;
 revoke all on function public.gerar_avisos_aniversario() from public,anon,authenticated;
 commit;
