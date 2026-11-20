@@ -40,6 +40,18 @@ function choices(id, rows, label, name) {
   }
   if (!rows.length) box.textContent = 'Nenhum cadastro disponível.';
 }
+function preencherSeletor(select, rows, placeholder, describe) {
+  const selected = select.value;
+  const first = node('option', placeholder);
+  first.value = '';
+  select.replaceChildren(first);
+  for (const row of rows) {
+    const option = node('option', describe(row));
+    option.value = row.id;
+    select.append(option);
+  }
+  if (rows.some(row => row.id === selected)) select.value = selected;
+}
 function edit(form, values) {
   form.reset();
   for (const el of form.elements) {
@@ -80,6 +92,11 @@ async function load() {
   profile.nascimento.value = own?.data_nascimento || '';
   profile.nascimento.max = new Date().toLocaleDateString('en-CA');
   if (leader) {
+    const adicionar = byId('addMemberForm');
+    preencherSeletor(adicionar.elements.integrante, members, 'Selecione um integrante', member => member.nome_completo);
+    preencherSeletor(adicionar.elements.escala, scales, 'Selecione uma escala', scale =>
+      scale.titulo + ' — ' + new Date(scale.inicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
+    adicionar.querySelector('button').disabled = !members.length || !scales.length;
     choices('teamOptions', members, 'nome_completo', 'integrantes');
     choices('songOptions', songs, 'titulo', 'musicas');
     cards('teamList', members, 'Os integrantes aparecem aqui depois de preencherem o cadastro.', (m, card) => {
@@ -322,6 +339,37 @@ submit('profileForm',async (form, values) => {
   if (error) throw Error('Confira os dados e use o e-mail da sua conta.');
   await load(); return 'Cadastro salvo.';
 });
+async function adicionarIntegrante(escala, integrante) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await api.from('escalas').select('integrantes').eq('id', escala).single();
+    if (error) throw Error('Não foi possível consultar a escala.');
+    const atuais = data.integrantes;
+    if (atuais.includes(integrante)) return false;
+
+    const updated = await api.from('escalas').update({ integrantes: [...atuais, integrante] })
+      .eq('id', escala).eq('integrantes', '{' + atuais.join(',') + '}').select('id').maybeSingle();
+    if (updated.error) throw Error('Não foi possível adicionar o integrante.');
+    if (updated.data) return true;
+  }
+  throw Error('A escala foi alterada ao mesmo tempo por outra pessoa. Tente novamente.');
+}
+
+submit('addMemberForm', async (form, values) => {
+  const integrante = values.get('integrante');
+  const escala = values.get('escala');
+  if (!leader || !members.some(member => member.id === integrante) || !scales.some(item => item.id === escala)) {
+    throw Error('Selecione um integrante cadastrado e uma escala.');
+  }
+  if (!await adicionarIntegrante(escala, integrante)) return 'Este integrante já está na escala.';
+  form.reset();
+  try {
+    await load();
+  } catch {
+    return 'Integrante adicionado. Atualize a página para conferir a escala.';
+  }
+  return 'Integrante adicionado à escala.';
+});
+
 let currentInvite = '';
 byId('copyInvite').onclick = async () => {
   try { await navigator.clipboard.writeText(currentInvite); notify('Link individual copiado.'); }
