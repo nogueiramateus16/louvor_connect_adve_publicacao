@@ -1,37 +1,42 @@
-LOUVOR CONNECT ADVE — PUBLICAÇÃO NO GITHUB PAGES
+LOUVOR CONNECT ADVE — ACESSO E PUBLICAÇÃO
 
-Versão: demonstração pública PWA (aplicativo instalável no celular)
+GitHub Pages
+  Site: https://nogueiramateus16.github.io/louvor_connect_adve_publicacao/
+  Login: https://nogueiramateus16.github.io/louvor_connect_adve_publicacao/login.html
+  No GitHub, confira Settings > Pages > Deploy from a branch > main > /(root).
+  O GitHub Pages publica os arquivos da raiz após a integração em main.
 
-ARQUIVOS DO SITE:
-  index.html
-  manifest.webmanifest
-  icon-192.png
-  icon-512.png
-  sw.js
+Supabase — preservar a conta do líder
+  1. Em Authentication > Users, abra a conta existente e copie seu UUID.
+     Use o mesmo usuário para preservar os vínculos. Se a conta já está
+     cadastrada, use a recuperação de senha.
+  2. No Table Editor > lideres, procure esse UUID na coluna usuario_id.
+     Se a linha já existir, a associação está feita. Se faltar, confira
+     o e-mail e o UUID da conta aprovada e adicione somente essa linha.
+  3. Mantenha RLS habilitada. A política de leitura deve permitir ao
+     usuário autenticado ler a própria linha (usuario_id = auth.uid()).
+     A autorização de escrita deve ficar com a administração.
+  4. Confira se o provedor Email está ativo e o cadastro público desativado.
+     Se a conta ainda não existir, use o convite administrativo em
+     Authentication > Users para que a pessoa defina a própria senha.
 
-COMO PUBLICAR:
-1. Extraia (descompacte) o arquivo ZIP no seu computador.
-2. Acesse: https://github.com/nogueiramateus16/louvor_connect_adve_publicacao
-3. Clique em "uploading an existing file" se o repositório estiver vazio,
-   ou em Add file > Upload files se já houver arquivos.
-4. Selecione os CINCO arquivos do site acima e arraste para o GitHub.
-   Não envie apenas o ZIP: o GitHub não descompacta automaticamente.
-5. Clique em Commit changes (Salvar alterações).
-6. Abra Settings > Pages e, em Build and deployment, selecione
-   Deploy from a branch > main > /(root) > Save.
-7. Após o GitHub indicar que a publicação foi concluída, abra:
-   https://nogueiramateus16.github.io/louvor_connect_adve_publicacao/
+Supabase — links e envio de e-mail
+  1. Em Authentication > URL Configuration, confira se o endereço de login
+     acima está em Redirect URLs e se Site URL aponta para o login publicado
+     quando links administrativos usam o destino padrão.
+  2. Em Authentication > Emails, confira os modelos de convite e recuperação.
+     Com este site estático, os modelos padrão usam {{ .ConfirmationURL }}
+     para que o Supabase valide o link antes de redirecionar de volta.
+  3. Configure SMTP próprio para enviar a endereços fora da equipe do projeto.
+     As credenciais SMTP ficam no Supabase. O front-end usa a chave publicável.
+  4. Peça um link pelo site, abra o e-mail, defina uma senha e confirme a
+     indicação “Líder autorizado”. Saia e entre de novo com a nova senha.
+     Confira também que um link expirado permite solicitar outro.
 
-INSTALAÇÃO NO CELULAR:
-- Android/Chrome: menu ⋮ > Adicionar à tela inicial / Instalar app.
-- iPhone/Safari: Compartilhar > Adicionar à Tela de Início.
-
-IMPORTANTE — SEGURANÇA E LIMITAÇÕES:
-Este site é um protótipo demonstrativo estático, SEM autenticação real,
-SEM banco de dados e SEM sincronização entre integrantes.
-Os registros de integrantes, músicas e escalas são guardados SOMENTE
-no navegador usado (localStorage). Não são compartilhados entre aparelhos.
-Utilize dados fictícios para testes. Não informe senhas ou dados pessoais
-reais de integrantes nesta versão pública. A opção de convite real/individual
-por WhatsApp ainda exige backend com autenticação e autorização seguras.
-Faça backup JSON em Administração antes de limpar os dados do navegador.
+Demonstração e dados existentes
+  A página inicial continua sendo a demonstração pública instalável.
+  Dados da demonstração ficam no navegador, sem sincronização. Para preservar
+  esses registros, use Administração > Exportar backup antes de trocar de
+  navegador ou limpar o armazenamento. Importar substitui os registros locais.
+  A tela de login autentica a conta e confirma a função. A gestão de escalas
+  e integrantes pelo banco ainda precisa de integração antes de uso real.
