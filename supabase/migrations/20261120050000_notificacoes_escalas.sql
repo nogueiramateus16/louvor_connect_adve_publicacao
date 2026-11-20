@@ -22,14 +22,17 @@ create policy notificacoes_escala_proprio_update on public.notificacoes_escala
 create function public.avisar_integrantes_escala()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  -- Apenas integrantes novos recebem aviso, não em cada edição.
-  insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
-  select distinct pessoa, new.id,
-    case when tg_op = 'INSERT' then 'escala_criada' else 'adicionado_escala' end,
-    new.titulo,new.inicio
-  from unnest(new.integrantes) as pessoa
-  where tg_op = 'INSERT'
-     or not (pessoa = any(coalesce(old.integrantes,'{}'::uuid[])));
+  -- Em criação, avisar todos os incluídos; na edição, apenas novos integrantes.
+  if tg_op = 'INSERT' then
+    insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
+    select distinct pessoa, new.id, 'escala_criada', new.titulo,new.inicio
+    from unnest(new.integrantes) as pessoa;
+  else
+    insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
+    select distinct pessoa, new.id, 'adicionado_escala', new.titulo,new.inicio
+    from unnest(new.integrantes) as pessoa
+    where not (pessoa = any(old.integrantes));
+  end if;
   return new;
 end; $$;
 revoke all on function public.avisar_integrantes_escala() from public,anon,authenticated;
