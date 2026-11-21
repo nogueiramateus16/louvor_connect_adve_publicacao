@@ -119,7 +119,8 @@ async function load() {
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
     const date = new Date(scale.inicio);
     const titles = scale.musicas.map(id => songs.find(s => s.id === id)?.titulo).filter(Boolean);
-    const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
+    const scheduled = scale.integrantes.map(id => members.find(m => m.id === id)).filter(Boolean);
+    const names = scheduled.map(member => member.nome_completo);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
     if (chatAcessivel(scale)) {
@@ -127,6 +128,7 @@ async function load() {
       openChat.onclick = () => { tab('chat'); byId('chatScale').value = scale.id; loadChat().catch(e => notify(e.message)); };
       card.append(openChat);
     }
+    if (leader) addScaleEmailLinks(card, scale, scheduled);
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
       inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
   });
@@ -161,7 +163,9 @@ async function save(table, form, data) {
   const { error } = await query.select('id').single();
   if (error) throw Error('Falha ao salvar. Confira os campos e sua permissão.');
   form.reset(); form.closest('details').open = false;
-  await load(); return 'Alterações salvas.';
+  await load();
+  if (table === 'escalas') void loadNotifications().catch(() => {});
+  return 'Alterações salvas.';
 }
 let chatRequest = 0;
 async function loadChat() {
@@ -277,6 +281,65 @@ submit('inviteForm',async (form, values, button) => {
   }
   form.reset(); return data.message;
 });
+async function loadNotifications() {
+  const list = byId('notificationList');
+  const {data,error} = await api.from('notificacoes_escala')
+    .select('id,tipo,titulo,escala_inicio,criado_em,lida_em')
+    .order('criado_em',{ascending:false}).order('id').limit(100);
+  if (error) { list.replaceChildren(node('p','Não foi possível carregar seus avisos.')); return; }
+  const unread = data.filter(item => !item.lida_em).length;
+  const badge = byId('unreadCount');
+  badge.hidden = unread === 0;
+  badge.textContent = unread ? '(' + unread + ')' : '';
+  list.replaceChildren();
+  if (!data.length) { list.append(node('p','Você ainda não recebeu avisos de escalas.')); return; }
+  for (const item of data) {
+    const card = node('article');
+    const labels = {
+      escala_criada: 'Nova escala criada',
+      adicionado_escala: 'Você foi incluído em uma escala',
+      lembrete_escala: 'Lembrete de escala',
+      aniversario: 'Aniversariante do dia'
+    };
+    card.append(node('h3', labels[item.tipo] || 'Aviso'));
+    card.append(node('p',item.titulo + '\n' + new Date(item.escala_inicio).toLocaleString('pt-BR',{dateStyle:'long',timeStyle:'short'})));
+    card.append(node('small','Aviso registrado em ' + new Date(item.criado_em).toLocaleString('pt-BR')));
+    if (!item.lida_em) {
+      const button = node('button','Marcar como lida');
+      button.onclick = async () => {
+        button.disabled = true;
+        const {error} = await api.from('notificacoes_escala')
+          .update({lida_em:new Date().toISOString()}).eq('id',item.id).is('lida_em',null);
+        if (error) { notify('Não foi possível marcar o aviso como lido.'); button.disabled = false; }
+        else await loadNotifications();
+      };
+      card.append(node('p','Não lido'),button);
+    }
+    list.append(card);
+  }
+}
+function addScaleEmailLinks(card, scale, scheduled) {
+  const recipients = scheduled.filter(member => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(member.email || ''));
+  if (!recipients.length) return;
+  const delivery = node('details');
+  delivery.append(node('summary', 'Avisar integrantes por e-mail'));
+  const date = new Date(scale.inicio).toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo', dateStyle: 'long', timeStyle: 'short'
+  });
+  for (const member of recipients) {
+    const link = node('a', 'Preparar e-mail para ' + member.nome_completo);
+    const subject = 'Escala Louvor Connect ADVE: ' + scale.titulo;
+    const url = new URL('./painel.html', location.href).href;
+    const body = 'Olá, ' + member.nome_completo + '!\n\nVocê está na escala ' + scale.titulo +
+      ' em ' + date + ' (horário de Brasília). Confira os detalhes no Louvor Connect ADVE:\n' + url;
+    link.href = 'mailto:' + encodeURIComponent(member.email) +
+      '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    const line = node('p');
+    line.append(link);
+    delivery.append(line);
+  }
+  card.append(delivery);
+}
 async function start() {
   if (!api) throw Error('Conexão indisponível. Recarregue a página.');
   api.auth.onAuthStateChange((event,session) => {
@@ -301,6 +364,13 @@ async function start() {
   document.querySelector('[data-tab="chat"]').addEventListener('click', refreshChat);
   document.addEventListener('visibilitychange', refreshChat);
   setInterval(refreshChat, 5000);
+  const refreshNotifications = () => {
+    if (!document.hidden) void loadNotifications().catch(() => {});
+  };
+  document.querySelector('[data-tab="notifications"]').addEventListener('click', refreshNotifications);
+  document.addEventListener('visibilitychange', refreshNotifications);
+  setInterval(refreshNotifications, 60000);
+  refreshNotifications();
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
