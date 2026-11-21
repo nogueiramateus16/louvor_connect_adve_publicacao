@@ -6,8 +6,12 @@ const api = window.supabase?.createClient(cfg.url, cfg.publishableKey);
 let user;
 let leader = false;
 let members = [], songs = [], scales = [];
+const finalizacoes = new Map();
+const controlesCulto = [];
+let finalizacaoDisponivel = false;
+const cultoIniciado = (scale, now = Date.now()) => Date.parse(scale.inicio) <= now;
 const chatAberto = (scale, now = Date.now()) =>
-  Boolean(scale.termino && Date.parse(scale.inicio) <= now && now < Date.parse(scale.termino));
+  Boolean(!finalizacoes.has(scale.id) && scale.termino && cultoIniciado(scale, now) && now < Date.parse(scale.termino));
 const localInputValue = value => {
   if (!value) return '';
   const date = new Date(value);
@@ -116,23 +120,136 @@ async function load() {
     }
     editButton(card, () => edit(byId('songForm'), song));
   });
+  await atualizarFinalizacoes();
+  controlesCulto.length = 0;
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
     const date = new Date(scale.inicio);
     const titles = scale.musicas.map(id => songs.find(s => s.id === id)?.titulo).filter(Boolean);
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
-    if (chatAcessivel(scale)) {
-      const openChat = node('button', 'Abrir chat do culto');
-      openChat.onclick = () => { tab('chat'); byId('chatScale').value = scale.id; loadChat().catch(e => notify(e.message)); };
-      card.append(openChat);
-    }
+    montarControlesCulto(scale, card);
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
       inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
   });
   refreshChatChoices();
   return own;
 }
+async function atualizarFinalizacoes() {
+  if (!scales.length) return;
+  const { data, error } = await api.from('cultos_finalizados').select('escala_id,finalizado_em')
+    .in('escala_id', scales.map(scale => scale.id));
+  if (error) return;
+  finalizacaoDisponivel = true;
+  for (const item of data) finalizacoes.set(item.escala_id, item.finalizado_em);
+}
+
+function montarControlesCulto(scale, card) {
+  const openChat = node('button', 'Abrir chat do culto');
+  openChat.onclick = () => {
+    refreshChatChoices();
+    tab('chat');
+    byId('chatScale').value = scale.id;
+    loadChat().catch(error => notify(error.message));
+  };
+  const estado = node('p');
+  estado.setAttribute('role', 'status');
+  card.append(estado, openChat);
+  const chamada = node('details');
+  const lista = node('div');
+  chamada.append(node('summary', 'Chamada de presença'), lista);
+  const finalizar = node('button', 'Finalizar culto');
+  finalizar.type = 'button';
+  if (leader) card.append(chamada, finalizar);
+  let ocupada = false;
+
+  const atualizar = () => {
+    const encerrado = finalizacoes.has(scale.id);
+    const iniciado = cultoIniciado(scale);
+    openChat.hidden = !chatAcessivel(scale);
+    openChat.textContent = encerrado ? 'Ver histórico do chat' : 'Abrir chat do culto';
+    chamada.hidden = !finalizacaoDisponivel || !iniciado;
+    finalizar.hidden = !finalizacaoDisponivel || !iniciado || encerrado;
+    finalizar.disabled = ocupada;
+    const texto = encerrado ? 'Culto finalizado.'
+      : leader && iniciado && finalizacaoDisponivel
+        ? (scale.termino && Date.now() >= Date.parse(scale.termino)
+            ? 'Horário encerrado. Aguardando finalização do líder.'
+            : 'Culto iniciado. Chamada de presença disponível.')
+        : '';
+    if (estado.textContent !== texto) estado.textContent = texto;
+    estado.hidden = !texto;
+    for (const seletor of lista.querySelectorAll('select')) seletor.disabled = encerrado || ocupada;
+  };
+
+  chamada.addEventListener('toggle', async () => {
+    if (!chamada.open) return;
+    lista.textContent = 'Carregando chamada…';
+    try {
+      const { data, error } = await api.from('chamada_culto').select('integrante_id,presente').eq('escala_id', scale.id);
+      if (error) throw error;
+      const registros = new Map(data.map(item => [item.integrante_id, item.presente]));
+      lista.replaceChildren();
+      if (!scale.integrantes.length) lista.textContent = 'Nenhum integrante escalado.';
+      for (const id of new Set(scale.integrantes)) {
+        const nome = members.find(member => member.id === id)?.nome_completo || 'Integrante';
+        const label = node('label', nome);
+        const seletor = node('select');
+        for (const [value, text] of [['', 'Sem registro'], ['sim', 'Presente'], ['nao', 'Ausente']]) {
+          const option = node('option', text);
+          option.value = value;
+          option.disabled = value === '';
+          seletor.append(option);
+        }
+        seletor.value = registros.has(id) ? (registros.get(id) ? 'sim' : 'nao') : '';
+        seletor.onchange = async () => {
+          const compareceu = seletor.value === 'sim';
+          ocupada = true;
+          atualizar();
+          try {
+            const { error } = await api.rpc('registrar_chamada_culto', { escala: scale.id, integrante: id, compareceu });
+            if (error) throw error;
+            registros.set(id, compareceu);
+            notify('Presença registrada.');
+          } catch {
+            seletor.value = registros.has(id) ? (registros.get(id) ? 'sim' : 'nao') : '';
+            notify('Não foi possível registrar a presença. Verifique se a chamada ainda está aberta.');
+          } finally {
+            ocupada = false;
+            atualizar();
+          }
+        };
+        label.append(seletor);
+        lista.append(label);
+      }
+      atualizar();
+    } catch {
+      lista.textContent = 'Não foi possível carregar a chamada. Feche e abra para tentar novamente.';
+    }
+  });
+
+  finalizar.onclick = async () => {
+    if (!window.confirm('Finalizar este culto? A chamada e o envio de mensagens serão encerrados.')) return;
+    ocupada = true;
+    atualizar();
+    try {
+      const { data, error } = await api.rpc('finalizar_culto', { escala: scale.id });
+      if (error) throw error;
+      finalizacoes.set(scale.id, data);
+      refreshChatChoices();
+      notify('Culto finalizado. O histórico permanece disponível para o líder.');
+    } catch {
+      notify('Não foi possível finalizar o culto. Tente novamente.');
+    } finally {
+      ocupada = false;
+      atualizar();
+    }
+  };
+
+  atualizar();
+  controlesCulto.push(atualizar);
+}
+
 function refreshChatChoices() {
   const chatSelect = byId('chatScale');
   const selected = chatSelect.value;
@@ -300,7 +417,20 @@ async function start() {
   byId('chat').querySelector('form').hidden = true;
   document.querySelector('[data-tab="chat"]').addEventListener('click', refreshChat);
   document.addEventListener('visibilitychange', refreshChat);
-  setInterval(refreshChat, 5000);
+  let consultandoCulto = false;
+  setInterval(async () => {
+    if (document.hidden || consultandoCulto) return;
+    consultandoCulto = true;
+    try {
+      if (finalizacaoDisponivel) await atualizarFinalizacoes();
+      for (const atualizar of controlesCulto) atualizar();
+      refreshChat();
+    } catch {
+      refreshChat();
+    } finally {
+      consultandoCulto = false;
+    }
+  }, 5000);
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
