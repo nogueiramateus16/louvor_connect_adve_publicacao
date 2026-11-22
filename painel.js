@@ -160,17 +160,7 @@ async function load() {
       const link = node('a','Abrir cifra'); link.href = song.cifra;
       link.target = '_blank'; link.rel = 'noopener noreferrer'; card.append(link, node('br'));
     }
-    if (/^https?:\/\//i.test(song.audio || '')) {
-      const audio = node('a','Ouvir música'); audio.href = song.audio;
-      audio.target = '_blank'; audio.rel = 'noopener noreferrer'; card.append(audio, node('br'));
-      const id = youtubeId(song.audio);
-      if (id) {
-        const play = node('button', '▶ Ouvir trecho');
-        play.type = 'button';
-        play.onclick = () => showYoutubePlayer(card, id);
-        card.append(play);
-      }
-    }
+    montarOuvirMusica(song, card);
     if (song.trecho) {
       const trecho = node('details');
       trecho.append(node('summary', 'Trecho da música'), node('p', song.trecho));
@@ -183,10 +173,24 @@ async function load() {
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
     card.id = 'scale-' + scale.id;
     const date = new Date(scale.inicio);
-    const titles = scale.musicas.map(id => songs.find(s => s.id === id)?.titulo).filter(Boolean);
+    const musicas = scale.musicas.map(id => songs.find(s => s.id === id)).filter(Boolean);
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
-      node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
+      node('p',[leader ? names.join(', ') : '',scale.notas].filter(Boolean).join('\n')));
+    if (musicas.length) {
+      const repertorio = node('details');
+      repertorio.append(node('summary', 'Músicas da escala'));
+      for (const musica of musicas) {
+        const faixa = node('article');
+        faixa.append(node('h4', musica.titulo));
+        montarOuvirMusica(musica, faixa);
+        repertorio.append(faixa);
+      }
+      repertorio.addEventListener('toggle', () => {
+        if (!repertorio.open) repertorio.querySelector('.catalog-player')?.remove();
+      });
+      card.append(repertorio);
+    }
     if (leader || scale.ministrador_id === user.id) {
       montarEditorDeMusicas(scale, card);
     }
@@ -526,6 +530,28 @@ function youtubeId(value) {
   } catch {
     return '';
   }
+}
+
+
+function montarOuvirMusica(song, container) {
+  const actions = node('div');
+  actions.className = 'actions';
+  const id = youtubeId(song.audio);
+  if (id) {
+    const play = node('button', '▶ Ouvir trecho');
+    play.type = 'button';
+    play.onclick = () => showYoutubePlayer(container, id);
+    actions.append(play);
+  }
+  const url = new URL('https://www.youtube.com/results');
+  url.searchParams.set('search_query', [song.titulo, song.artista].filter(Boolean).join(' '));
+  const hasAudio = /^https?:\/\//i.test(song.audio || '');
+  const link = node('a', id ? 'Abrir no YouTube' : hasAudio ? 'Ouvir música' : 'Buscar no YouTube');
+  link.href = hasAudio ? song.audio : url.href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  actions.append(link);
+  container.append(actions);
 }
 
 function showYoutubePlayer(container, id) {
