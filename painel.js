@@ -147,6 +147,8 @@ async function load() {
       scale.titulo + ' — ' + new Date(scale.inicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
     adicionar.querySelector('button').disabled = !members.length || !scales.length;
     choices('teamOptions', members, 'nome_completo', 'integrantes');
+    preencherSeletor(byId('scaleForm').elements.ministrador_id, members,
+      'Sem ministrador auxiliar', member => member.nome_completo);
     choices('songOptions', songs, 'titulo', 'musicas');
     cards('teamList', members, 'Os integrantes aparecem aqui depois de preencherem o cadastro.', (m, card) => {
       card.append(node('h3',m.nome_completo), node('p',[m.email,m.telefone,m.funcao_musical,m.data_nascimento?.split('-').reverse().join('/')].filter(Boolean).join(' · ')));
@@ -185,6 +187,9 @@ async function load() {
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
+    if (leader || scale.ministrador_id === user.id) {
+      montarEditorDeMusicas(scale, card);
+    }
     montarControlesCulto(scale, card);
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
       inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
@@ -193,6 +198,54 @@ async function load() {
   refreshChatChoices();
   return own;
 }
+function montarEditorDeMusicas(scale, card) {
+  const editor = node('details');
+  const form = node('form');
+  const options = node('fieldset');
+  options.append(node('legend', 'Músicas do repertório'));
+  if (!songs.length) options.append(node('p', 'Nenhuma música cadastrada.'));
+  for (const song of songs) {
+    const label = node('label');
+    const input = node('input');
+    input.type = 'checkbox';
+    input.name = 'musica';
+    input.value = song.id;
+    input.checked = scale.musicas.includes(song.id);
+    label.append(input, node('span', song.titulo));
+    options.append(label);
+  }
+  const saveButton = node('button', 'Salvar músicas da escala');
+  saveButton.type = 'submit';
+  const message = node('p');
+  message.setAttribute('role', 'status');
+  form.append(options, saveButton, message);
+  editor.append(node('summary', 'Editar músicas da escala'), form);
+  card.append(editor);
+
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const selected = new Set(new FormData(form).getAll('musica'));
+    const musicasAnteriores = scale.musicas;
+    const novasMusicas = musicasAnteriores.filter(id => selected.delete(id)).concat([...selected]);
+    saveButton.disabled = true;
+    message.textContent = 'Salvando músicas…';
+    try {
+      const { error } = await api.rpc('salvar_musicas_da_escala', {
+        escala: scale.id, musicas_anteriores: musicasAnteriores, novas_musicas: novasMusicas
+      });
+      if (error) throw error;
+      scale.musicas = novasMusicas;
+      message.textContent = 'Músicas salvas.';
+      await load();
+      notify('Músicas da escala atualizadas.');
+    } catch {
+      message.textContent = 'Confira sua autorização e atualize a página antes de tentar novamente.';
+    } finally {
+      saveButton.disabled = false;
+    }
+  };
+}
+
 async function atualizarFinalizacoes() {
   if (!scales.length) return;
   const { data, error } = await api.from('cultos_finalizados').select('escala_id,finalizado_em')
@@ -385,10 +438,15 @@ submit('scaleForm', (form, values) => {
   const inicio = new Date(values.get('inicio'));
   const termino = values.get('termino') ? new Date(values.get('termino')) : null;
   if (termino && termino <= inicio) throw Error('O término precisa ser depois do início do culto.');
+  const integrantes = values.getAll('integrantes');
+  const ministrador = values.get('ministrador_id');
+  if (ministrador && !integrantes.includes(ministrador)) {
+    throw Error('Marque o ministrador também na equipe da escala.');
+  }
   return save('escalas', form, {
-    ...Object.fromEntries(values), inicio: inicio.toISOString(),
+    ...Object.fromEntries(values), inicio: inicio.toISOString(), ministrador_id: ministrador || null,
     termino: termino?.toISOString() ?? null,
-    integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas')
+    integrantes, musicas: values.getAll('musicas')
   });
 });
 submit('songForm',(form, values) => save('repertorio', form, Object.fromEntries(values)));
@@ -569,7 +627,7 @@ async function start() {
       consultandoCulto = false;
     }
   }, 5000);
-  tab(leader ? 'overview' : own?.data_nascimento ? 'scales' : 'profile');
+  tab(leader || own?.data_nascimento ? 'scales' : 'profile');
   byId('app').hidden = false;
   notify('');
 }
