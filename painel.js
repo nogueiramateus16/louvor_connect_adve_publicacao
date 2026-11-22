@@ -24,6 +24,7 @@ function node(tag, value) {
   return el;
 }
 function tab(id) {
+  if (id !== 'songs') document.querySelectorAll('.catalog-player').forEach(player => player.remove());
   for (const button of document.querySelectorAll('[data-tab]')) {
     const active = button.dataset.tab === id && (!button.classList.contains('leader') || leader);
     byId(button.dataset.tab).hidden = !active;
@@ -160,6 +161,13 @@ async function load() {
     if (/^https?:\/\//i.test(song.audio || '')) {
       const audio = node('a','Ouvir música'); audio.href = song.audio;
       audio.target = '_blank'; audio.rel = 'noopener noreferrer'; card.append(audio, node('br'));
+      const id = youtubeId(song.audio);
+      if (id) {
+        const play = node('button', '▶ Ouvir trecho');
+        play.type = 'button';
+        play.onclick = () => showYoutubePlayer(card, id);
+        card.append(play);
+      }
     }
     if (song.trecho) {
       const trecho = node('details');
@@ -445,94 +453,79 @@ submit('inviteForm',async (form, values, button) => {
   form.reset(); return data.message;
 });
 
-function searchCatalog(term) {
-  return new Promise((resolve, reject) => {
-    const frame = node('iframe');
-    frame.hidden = true;
-    frame.title = 'Busca no catálogo da Apple';
-    frame.setAttribute('sandbox', 'allow-scripts');
-    const url = new URL('https://itunes.apple.com/search');
-    url.search = new URLSearchParams({ term, country: 'BR', entity: 'song', limit: '12', callback: 'catalogResponse' });
-    const finish = (callback, value) => {
-      clearTimeout(timer);
-      window.removeEventListener('message', receive);
-      frame.remove();
-      callback(value);
-    };
-    const receive = event => {
-      if (event.source !== frame.contentWindow || event.data?.type !== 'song-catalog') return;
-      if (Array.isArray(event.data.results)) finish(resolve, event.data.results);
-      else finish(reject, Error('Catálogo indisponível'));
-    };
-    const timer = setTimeout(() => finish(reject, Error('Tempo de busca esgotado')), 12000);
-    window.addEventListener('message', receive);
-    frame.srcdoc = '<script>function catalogResponse(data){parent.postMessage({type:"song-catalog",results:data.results},"*")}</script>' +
-      '<script src="' + url.href.replaceAll('&', '&amp;') + '"></script>';
-    document.body.append(frame);
-  });
+function youtubeId(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    const [, route, pathId] = url.pathname.split('/');
+    let id;
+    if (url.hostname === 'youtu.be') id = route;
+    else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(url.hostname)) {
+      if (route === 'watch') id = url.searchParams.get('v');
+      else if (['shorts', 'live', 'embed'].includes(route)) id = pathId;
+    }
+    return /^[\w-]{11}$/.test(id || '') ? id : '';
+  } catch {
+    return '';
+  }
+}
+
+function showYoutubePlayer(container, id) {
+  document.querySelectorAll('.catalog-player').forEach(player => player.remove());
+  const player = node('iframe');
+  player.className = 'catalog-player';
+  player.title = 'Prévia da música no YouTube';
+  player.src = 'https://www.youtube.com/embed/' + id + '?autoplay=1&playsinline=1&end=30&hl=pt-BR';
+  player.allow = 'autoplay; encrypted-media; picture-in-picture';
+  player.allowFullscreen = true;
+  container.append(player);
 }
 
 function initSongCatalog() {
   const catalog = byId('songCatalog');
-  const form = byId('catalogForm');
+  const search = byId('catalogForm');
+  const video = byId('youtubeForm');
   const status = byId('catalogStatus');
-  const results = byId('catalogResults');
-  const searchButton = form.querySelector('button');
-  const removePlayer = () => results.querySelector('iframe')?.remove();
-  catalog.addEventListener('toggle', () => { if (!catalog.open) removePlayer(); });
-  document.querySelectorAll('[data-tab]').forEach(button => {
-    if (button.dataset.tab !== 'songs') button.addEventListener('click', removePlayer);
-  });
-
-  form.addEventListener('submit', async event => {
+  search.onsubmit = event => {
     event.preventDefault();
-    const term = form.elements.query.value.trim();
-    if (term.length < 2 || searchButton.disabled) return;
-    searchButton.disabled = true;
-    status.textContent = 'Buscando músicas…';
+    const term = search.elements.query.value.trim();
+    if (term.length < 2) return;
+    const url = new URL('https://www.youtube.com/results');
+    url.searchParams.set('search_query', term);
+    window.open(url.href, '_blank', 'noopener,noreferrer');
+    status.textContent = 'No YouTube, toque em Compartilhar, copie o link do vídeo e cole aqui.';
+  };
+  const selectedId = () => {
+    const id = youtubeId(video.elements.video.value.trim());
+    status.textContent = id ? '' : 'Cole um link de vídeo válido do YouTube.';
+    return id;
+  };
+  video.onsubmit = event => {
+    event.preventDefault();
+    const id = selectedId();
+    if (!id) return;
+    const results = byId('catalogResults');
     results.replaceChildren();
-    try {
-      const tracks = (await searchCatalog(term)).filter(track =>
-        typeof track?.trackName === 'string' && typeof track.artistName === 'string' &&
-        Number.isSafeInteger(track.trackId) && Number.isSafeInteger(track.collectionId));
-      status.textContent = tracks.length ? '' : 'Nenhuma música encontrada. Tente buscar pelo título e pelo artista.';
-      for (const track of tracks) {
-        const card = node('article');
-        const actions = node('div');
-        actions.className = 'actions';
-        const play = node('button', '▶ Ouvir prévia');
-        play.type = 'button';
-        play.onclick = () => {
-          removePlayer();
-          const player = node('iframe');
-          player.className = 'catalog-player';
-          player.title = 'Prévia de ' + track.trackName;
-          player.src = 'https://embed.music.apple.com/br/album/' + track.collectionId + '?i=' + track.trackId;
-          player.allow = 'autoplay *; encrypted-media *';
-          card.append(player);
-        };
-        actions.append(play);
-        if (leader) {
-          const use = node('button', 'Usar no cadastro');
-          use.type = 'button';
-          use.onclick = () => {
-            const song = byId('songForm');
-            song.elements.titulo.value = track.trackName.slice(0, 180);
-            song.elements.artista.value = track.artistName;
-            catalog.open = false;
-            song.closest('details').open = true;
-            song.elements.titulo.focus();
-          };
-          actions.append(use);
-        }
-        card.append(node('h3', track.trackName), node('p', track.artistName), actions);
-        results.append(card);
-      }
-    } catch {
-      status.textContent = 'Não foi possível buscar músicas agora. Tente novamente em instantes.';
-    } finally {
-      searchButton.disabled = false;
-    }
+    showYoutubePlayer(results, id);
+    const link = node('a', 'Abrir no YouTube');
+    link.href = 'https://www.youtube.com/watch?v=' + id;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    results.append(link);
+  };
+  byId('useYoutube').onclick = () => {
+    if (!leader) return;
+    const id = selectedId();
+    if (!id) return;
+    const song = byId('songForm');
+    if (!song.elements.titulo.value.trim()) song.elements.titulo.value = search.elements.query.value.trim().slice(0, 180);
+    song.elements.audio.value = 'https://www.youtube.com/watch?v=' + id;
+    catalog.open = false;
+    song.closest('details').open = true;
+    song.elements.titulo.focus();
+  };
+  catalog.addEventListener('toggle', () => {
+    if (!catalog.open) byId('catalogResults').replaceChildren();
   });
 }
 
