@@ -444,6 +444,98 @@ submit('inviteForm',async (form, values, button) => {
   }
   form.reset(); return data.message;
 });
+
+function searchCatalog(term) {
+  return new Promise((resolve, reject) => {
+    const frame = node('iframe');
+    frame.hidden = true;
+    frame.title = 'Busca no catálogo da Apple';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    const url = new URL('https://itunes.apple.com/search');
+    url.search = new URLSearchParams({ term, country: 'BR', entity: 'song', limit: '12', callback: 'catalogResponse' });
+    const finish = (callback, value) => {
+      clearTimeout(timer);
+      window.removeEventListener('message', receive);
+      frame.remove();
+      callback(value);
+    };
+    const receive = event => {
+      if (event.source !== frame.contentWindow || event.data?.type !== 'song-catalog') return;
+      if (Array.isArray(event.data.results)) finish(resolve, event.data.results);
+      else finish(reject, Error('Catálogo indisponível'));
+    };
+    const timer = setTimeout(() => finish(reject, Error('Tempo de busca esgotado')), 12000);
+    window.addEventListener('message', receive);
+    frame.srcdoc = '<script>function catalogResponse(data){parent.postMessage({type:"song-catalog",results:data.results},"*")}</script>' +
+      '<script src="' + url.href.replaceAll('&', '&amp;') + '"></script>';
+    document.body.append(frame);
+  });
+}
+
+function initSongCatalog() {
+  const catalog = byId('songCatalog');
+  const form = byId('catalogForm');
+  const status = byId('catalogStatus');
+  const results = byId('catalogResults');
+  const searchButton = form.querySelector('button');
+  const removePlayer = () => results.querySelector('iframe')?.remove();
+  catalog.addEventListener('toggle', () => { if (!catalog.open) removePlayer(); });
+  document.querySelectorAll('[data-tab]').forEach(button => {
+    if (button.dataset.tab !== 'songs') button.addEventListener('click', removePlayer);
+  });
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const term = form.elements.query.value.trim();
+    if (term.length < 2 || searchButton.disabled) return;
+    searchButton.disabled = true;
+    status.textContent = 'Buscando músicas…';
+    results.replaceChildren();
+    try {
+      const tracks = (await searchCatalog(term)).filter(track =>
+        typeof track?.trackName === 'string' && typeof track.artistName === 'string' &&
+        Number.isSafeInteger(track.trackId) && Number.isSafeInteger(track.collectionId));
+      status.textContent = tracks.length ? '' : 'Nenhuma música encontrada. Tente buscar pelo título e pelo artista.';
+      for (const track of tracks) {
+        const card = node('article');
+        const actions = node('div');
+        actions.className = 'actions';
+        const play = node('button', '▶ Ouvir prévia');
+        play.type = 'button';
+        play.onclick = () => {
+          removePlayer();
+          const player = node('iframe');
+          player.className = 'catalog-player';
+          player.title = 'Prévia de ' + track.trackName;
+          player.src = 'https://embed.music.apple.com/br/album/' + track.collectionId + '?i=' + track.trackId;
+          player.allow = 'autoplay *; encrypted-media *';
+          card.append(player);
+        };
+        actions.append(play);
+        if (leader) {
+          const use = node('button', 'Usar no cadastro');
+          use.type = 'button';
+          use.onclick = () => {
+            const song = byId('songForm');
+            song.elements.titulo.value = track.trackName.slice(0, 180);
+            song.elements.artista.value = track.artistName;
+            catalog.open = false;
+            song.closest('details').open = true;
+            song.elements.titulo.focus();
+          };
+          actions.append(use);
+        }
+        card.append(node('h3', track.trackName), node('p', track.artistName), actions);
+        results.append(card);
+      }
+    } catch {
+      status.textContent = 'Não foi possível buscar músicas agora. Tente novamente em instantes.';
+    } finally {
+      searchButton.disabled = false;
+    }
+  });
+}
+
 async function start() {
   if (!api) throw Error('Conexão indisponível. Recarregue a página.');
   api.auth.onAuthStateChange((event,session) => {
@@ -458,6 +550,7 @@ async function start() {
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
   if (leader) bindOverview();
+  initSongCatalog();
   const own = await load();
   const refreshChat = () => {
     if (!document.hidden && !byId('chat').hidden) {
