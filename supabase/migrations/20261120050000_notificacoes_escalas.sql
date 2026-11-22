@@ -26,12 +26,14 @@ begin
   if tg_op = 'INSERT' then
     insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
     select distinct pessoa, new.id, 'escala_criada', new.titulo,new.inicio
-    from unnest(new.integrantes) as pessoa;
+    from unnest(new.integrantes) as atribuicao(pessoa)
+    join auth.users conta on conta.id = atribuicao.pessoa;
   else
     insert into public.notificacoes_escala(destinatario_id,escala_id,tipo,titulo,escala_inicio)
     select distinct pessoa, new.id, 'adicionado_escala', new.titulo,new.inicio
-    from unnest(new.integrantes) as pessoa
-    where not (pessoa = any(old.integrantes));
+    from unnest(new.integrantes) as atribuicao(pessoa)
+    join auth.users conta on conta.id = atribuicao.pessoa
+    where not exists (select 1 from unnest(old.integrantes) anterior(id) where anterior.id = pessoa);
   end if;
   return new;
 end; $$;

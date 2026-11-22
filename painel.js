@@ -6,9 +6,17 @@ const api = window.supabase?.createClient(cfg.url, cfg.publishableKey);
 let user;
 let leader = false;
 let members = [], songs = [], scales = [];
-const cultoDia = inicio => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(inicio));
-const hojeCulto = () => cultoDia(new Date().toISOString());
-const chatAberto = scale => cultoDia(scale.inicio) === hojeCulto();
+const finalizacoes = new Map();
+const controlesCulto = [];
+let finalizacaoDisponivel = false;
+const cultoIniciado = (scale, now = Date.now()) => Date.parse(scale.inicio) <= now;
+const chatAberto = (scale, now = Date.now()) =>
+  Boolean(!finalizacoes.has(scale.id) && scale.termino && cultoIniciado(scale, now) && now < Date.parse(scale.termino));
+const localInputValue = value => {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 const chatAcessivel = scale => leader || (scale.integrantes.includes(user.id) && chatAberto(scale));
 function node(tag, value) {
   const el = document.createElement(tag);
@@ -31,6 +39,18 @@ function choices(id, rows, label, name) {
     line.append(input, document.createTextNode(item[label])); box.append(line);
   }
   if (!rows.length) box.textContent = 'Nenhum cadastro disponível.';
+}
+function preencherSeletor(select, rows, placeholder, describe) {
+  const selected = select.value;
+  const first = node('option', placeholder);
+  first.value = '';
+  select.replaceChildren(first);
+  for (const row of rows) {
+    const option = node('option', describe(row));
+    option.value = row.id;
+    select.append(option);
+  }
+  if (rows.some(row => row.id === selected)) select.value = selected;
 }
 function edit(form, values) {
   form.reset();
@@ -72,6 +92,11 @@ async function load() {
   profile.nascimento.value = own?.data_nascimento || '';
   profile.nascimento.max = new Date().toLocaleDateString('en-CA');
   if (leader) {
+    const adicionar = byId('addMemberForm');
+    preencherSeletor(adicionar.elements.integrante, members, 'Selecione um integrante', member => member.nome_completo);
+    preencherSeletor(adicionar.elements.escala, scales, 'Selecione uma escala', scale =>
+      scale.titulo + ' — ' + new Date(scale.inicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
+    adicionar.querySelector('button').disabled = !members.length || !scales.length;
     choices('teamOptions', members, 'nome_completo', 'integrantes');
     choices('songOptions', songs, 'titulo', 'musicas');
     cards('teamList', members, 'Os integrantes aparecem aqui depois de preencherem o cadastro.', (m, card) => {
@@ -88,22 +113,144 @@ async function load() {
       const audio = node('a','Ouvir música'); audio.href = song.audio;
       audio.target = '_blank'; audio.rel = 'noopener noreferrer'; card.append(audio, node('br'));
     }
+    if (song.trecho) {
+      const trecho = node('details');
+      trecho.append(node('summary', 'Trecho da música'), node('p', song.trecho));
+      card.append(trecho);
+    }
     editButton(card, () => edit(byId('songForm'), song));
   });
+  await atualizarFinalizacoes();
+  controlesCulto.length = 0;
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
     const date = new Date(scale.inicio);
     const titles = scale.musicas.map(id => songs.find(s => s.id === id)?.titulo).filter(Boolean);
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
     card.append(node('h3',scale.titulo),node('p',date.toLocaleString('pt-BR')),
       node('p',[leader ? names.join(', ') : '',titles.join(' • '),scale.notas].filter(Boolean).join('\n')));
-    if (chatAcessivel(scale)) {
-      const openChat = node('button',chatAberto(scale) ? 'Abrir chat do culto' : 'Ver histórico do chat');
-      openChat.onclick = () => { tab('chat'); byId('chatScale').value = scale.id; loadChat().catch(e => notify(e.message)); };
-      card.append(openChat);
-    }
+    montarControlesCulto(scale, card);
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
-      inicio: new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,16) }));
+      inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
   });
+  refreshChatChoices();
+  return own;
+}
+async function atualizarFinalizacoes() {
+  if (!scales.length) return;
+  const { data, error } = await api.from('cultos_finalizados').select('escala_id,finalizado_em')
+    .in('escala_id', scales.map(scale => scale.id));
+  if (error) return;
+  finalizacaoDisponivel = true;
+  for (const item of data) finalizacoes.set(item.escala_id, item.finalizado_em);
+}
+
+function montarControlesCulto(scale, card) {
+  const openChat = node('button', 'Abrir chat do culto');
+  openChat.onclick = () => {
+    refreshChatChoices();
+    tab('chat');
+    byId('chatScale').value = scale.id;
+    loadChat().catch(error => notify(error.message));
+  };
+  const estado = node('p');
+  estado.setAttribute('role', 'status');
+  card.append(estado, openChat);
+  const chamada = node('details');
+  const lista = node('div');
+  chamada.append(node('summary', 'Chamada de presença'), lista);
+  const finalizar = node('button', 'Finalizar culto');
+  finalizar.type = 'button';
+  if (leader) card.append(chamada, finalizar);
+  let ocupada = false;
+
+  const atualizar = () => {
+    const encerrado = finalizacoes.has(scale.id);
+    const iniciado = cultoIniciado(scale);
+    openChat.hidden = !chatAcessivel(scale);
+    openChat.textContent = encerrado ? 'Ver histórico do chat' : 'Abrir chat do culto';
+    chamada.hidden = !finalizacaoDisponivel || !iniciado;
+    finalizar.hidden = !finalizacaoDisponivel || !iniciado || encerrado;
+    finalizar.disabled = ocupada;
+    const texto = encerrado ? 'Culto finalizado.'
+      : leader && iniciado && finalizacaoDisponivel
+        ? (scale.termino && Date.now() >= Date.parse(scale.termino)
+            ? 'Horário encerrado. Aguardando finalização do líder.'
+            : 'Culto iniciado. Chamada de presença disponível.')
+        : '';
+    if (estado.textContent !== texto) estado.textContent = texto;
+    estado.hidden = !texto;
+    for (const seletor of lista.querySelectorAll('select')) seletor.disabled = encerrado || ocupada;
+  };
+
+  chamada.addEventListener('toggle', async () => {
+    if (!chamada.open) return;
+    lista.textContent = 'Carregando chamada…';
+    try {
+      const { data, error } = await api.from('chamada_culto').select('integrante_id,presente').eq('escala_id', scale.id);
+      if (error) throw error;
+      const registros = new Map(data.map(item => [item.integrante_id, item.presente]));
+      lista.replaceChildren();
+      if (!scale.integrantes.length) lista.textContent = 'Nenhum integrante escalado.';
+      for (const id of new Set(scale.integrantes)) {
+        const nome = members.find(member => member.id === id)?.nome_completo || 'Integrante';
+        const label = node('label', nome);
+        const seletor = node('select');
+        for (const [value, text] of [['', 'Sem registro'], ['sim', 'Presente'], ['nao', 'Ausente']]) {
+          const option = node('option', text);
+          option.value = value;
+          option.disabled = value === '';
+          seletor.append(option);
+        }
+        seletor.value = registros.has(id) ? (registros.get(id) ? 'sim' : 'nao') : '';
+        seletor.onchange = async () => {
+          const compareceu = seletor.value === 'sim';
+          ocupada = true;
+          atualizar();
+          try {
+            const { error } = await api.rpc('registrar_chamada_culto', { escala: scale.id, integrante: id, compareceu });
+            if (error) throw error;
+            registros.set(id, compareceu);
+            notify('Presença registrada.');
+          } catch {
+            seletor.value = registros.has(id) ? (registros.get(id) ? 'sim' : 'nao') : '';
+            notify('Não foi possível registrar a presença. Verifique se a chamada ainda está aberta.');
+          } finally {
+            ocupada = false;
+            atualizar();
+          }
+        };
+        label.append(seletor);
+        lista.append(label);
+      }
+      atualizar();
+    } catch {
+      lista.textContent = 'Não foi possível carregar a chamada. Feche e abra para tentar novamente.';
+    }
+  });
+
+  finalizar.onclick = async () => {
+    if (!window.confirm('Finalizar este culto? A chamada e o envio de mensagens serão encerrados.')) return;
+    ocupada = true;
+    atualizar();
+    try {
+      const { data, error } = await api.rpc('finalizar_culto', { escala: scale.id });
+      if (error) throw error;
+      finalizacoes.set(scale.id, data);
+      refreshChatChoices();
+      notify('Culto finalizado. O histórico permanece disponível para o líder.');
+    } catch {
+      notify('Não foi possível finalizar o culto. Tente novamente.');
+    } finally {
+      ocupada = false;
+      atualizar();
+    }
+  };
+
+  atualizar();
+  controlesCulto.push(atualizar);
+}
+
+function refreshChatChoices() {
   const chatSelect = byId('chatScale');
   const selected = chatSelect.value;
   chatSelect.replaceChildren();
@@ -112,9 +259,6 @@ async function load() {
     option.value = scale.id; chatSelect.append(option);
   }
   if ([...chatSelect.options].some(option => option.value === selected)) chatSelect.value = selected;
-  await loadChat();
-  await loadNotifications();
-  return own;
 }
 function submit(id, action) {
   const form = byId(id);
@@ -167,16 +311,31 @@ async function loadNotifications() {
     list.append(card);
   }
 }
+let chatRequest = 0;
 async function loadChat() {
+  const request = ++chatRequest;
   const id = byId('chatScale').value;
   const list = byId('chatList'), form = byId('chatForm');
-  list.replaceChildren();
   const scale = scales.find(s => s.id === id);
-  if (!scale) { list.textContent = 'Nenhum culto com chat disponível.'; form.hidden = true; return; }
-  form.hidden = !chatAberto(scale) || (!leader && !scale.integrantes.includes(user.id));
-  const {data,error} = await api.from('mensagens_culto').select('id,autor_id,mensagem,criado_em').eq('escala_id',id).order('criado_em',{ascending:true}).limit(300);
+  if (!scale || !chatAcessivel(scale)) {
+    list.textContent = 'Nenhum culto com chat disponível.';
+    form.hidden = true;
+    return;
+  }
+  form.hidden = !chatAberto(scale);
+  if (list.dataset.scale !== id) list.replaceChildren();
+  list.dataset.scale = id;
+  const {data,error} = await api.from('mensagens_culto').select('id,autor_id,mensagem,criado_em').eq('escala_id',id).order('criado_em',{ascending:false}).order('id',{ascending:false}).limit(300);
+  if (request !== chatRequest) return;
+  if (!chatAcessivel(scale)) {
+    list.textContent = 'O chat deste culto foi encerrado.';
+    form.hidden = true;
+    return;
+  }
   if (error) { list.textContent = 'Não foi possível consultar o chat.'; return; }
+  list.replaceChildren();
   if (!data.length) list.textContent = 'Nenhuma mensagem neste culto.';
+  data.reverse();
   for (const item of data) {
     const author = members.find(m => m.id === item.autor_id)?.nome_completo || 'Integrante';
     const card = node('article');
@@ -190,19 +349,58 @@ submit('chatForm',async(form,values) => {
   const mensagem = String(values.get('mensagem') || '').trim();
   if (!mensagem || mensagem.length > 1000) throw Error('Escreva uma mensagem de até 1000 caracteres.');
   const scale = scales.find(s=>s.id === escala_id);
-  if (!scale || !chatAberto(scale)) throw Error('O chat funciona somente no dia do culto.');
+  if (!scale || !chatAberto(scale) || !chatAcessivel(scale)) throw Error('O chat está fechado para esta escala.');
   const {error} = await api.from('mensagens_culto').insert({escala_id,mensagem});
   if (error) throw Error('Não foi possível enviar a mensagem. Confira sua escala e tente novamente.');
   form.reset(); await loadChat(); return 'Mensagem enviada.';
 });
-submit('scaleForm',(form, values) => save('escalas',form,{ ...Object.fromEntries(values),
-  inicio: new Date(values.get('inicio')).toISOString(), integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas') }));
+submit('scaleForm', (form, values) => {
+  const inicio = new Date(values.get('inicio'));
+  const termino = values.get('termino') ? new Date(values.get('termino')) : null;
+  if (termino && termino <= inicio) throw Error('O término precisa ser depois do início do culto.');
+  return save('escalas', form, {
+    ...Object.fromEntries(values), inicio: inicio.toISOString(),
+    termino: termino?.toISOString() ?? null,
+    integrantes: values.getAll('integrantes'), musicas: values.getAll('musicas')
+  });
+});
 submit('songForm',(form, values) => save('repertorio', form, Object.fromEntries(values)));
 submit('profileForm',async (form, values) => {
   const { error } = await api.rpc('salvar_meu_cadastro',Object.fromEntries(values));
   if (error) throw Error('Confira os dados e use o e-mail da sua conta.');
   await load(); return 'Cadastro salvo.';
 });
+async function adicionarIntegrante(escala, integrante) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await api.from('escalas').select('integrantes').eq('id', escala).single();
+    if (error) throw Error('Não foi possível consultar a escala.');
+    const atuais = data.integrantes;
+    if (atuais.includes(integrante)) return false;
+
+    const updated = await api.from('escalas').update({ integrantes: [...atuais, integrante] })
+      .eq('id', escala).eq('integrantes', '{' + atuais.join(',') + '}').select('id').maybeSingle();
+    if (updated.error) throw Error('Não foi possível adicionar o integrante.');
+    if (updated.data) return true;
+  }
+  throw Error('A escala foi alterada ao mesmo tempo por outra pessoa. Tente novamente.');
+}
+
+submit('addMemberForm', async (form, values) => {
+  const integrante = values.get('integrante');
+  const escala = values.get('escala');
+  if (!leader || !members.some(member => member.id === integrante) || !scales.some(item => item.id === escala)) {
+    throw Error('Selecione um integrante cadastrado e uma escala.');
+  }
+  if (!await adicionarIntegrante(escala, integrante)) return 'Este integrante já está na escala.';
+  form.reset();
+  try {
+    await load();
+  } catch {
+    return 'Integrante adicionado. Atualize a página para conferir a escala.';
+  }
+  return 'Integrante adicionado à escala.';
+});
+
 let currentInvite = '';
 byId('copyInvite').onclick = async () => {
   try { await navigator.clipboard.writeText(currentInvite); notify('Link individual copiado.'); }
@@ -241,13 +439,38 @@ async function start() {
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
   const own = await load();
+  const refreshChat = () => {
+    if (!document.hidden && !byId('chat').hidden) {
+      refreshChatChoices();
+      loadChat().catch(error => notify(error.message));
+    }
+  };
+  byId('chat').querySelector('form').hidden = true;
+  document.querySelector('[data-tab="chat"]').addEventListener('click', refreshChat);
+  document.addEventListener('visibilitychange', refreshChat);
+  let consultandoCulto = false;
+  setInterval(async () => {
+    if (document.hidden || consultandoCulto) return;
+    consultandoCulto = true;
+    try {
+      if (finalizacaoDisponivel) await atualizarFinalizacoes();
+      for (const atualizar of controlesCulto) atualizar();
+      refreshChat();
+    } catch {
+      refreshChat();
+    } finally {
+      consultandoCulto = false;
+    }
+  }, 5000);
   tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
   byId('app').hidden = false;
   notify('');
-  // Atualiza enquanto a página está aberta; não é push em segundo plano.
-  setInterval(() => { if (document.visibilityState === 'visible') loadNotifications().catch(() => {}); }, 60000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') loadNotifications().catch(() => {});
-  });
+  const refreshNotifications = () => {
+    if (!document.hidden) loadNotifications().catch(() => {});
+  };
+  byId('notificationTab').addEventListener('click', refreshNotifications);
+  document.addEventListener('visibilitychange', refreshNotifications);
+  setInterval(refreshNotifications, 60000);
+  refreshNotifications();
 }
 start().catch(e => notify(e.message));
