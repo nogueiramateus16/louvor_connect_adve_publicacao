@@ -1,9 +1,85 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#160b23"><title>Painel • Louvor Connect ADVE</title><style>
-:root{color-scheme:dark;font:16px/1.5 system-ui;background:#100a18;color:#f7efff}*{box-sizing:border-box}body{max-width:880px;margin:auto;padding:20px}header,nav,.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}header img{width:44px;border-radius:10px}header a{margin-left:auto}h1{font-size:1.35rem}h2{margin:0 0 14px}nav{margin:22px 0}button,a{font:inherit;color:#e8c5ff}button{background:#2c1b3c;border:1px solid #6a4382;border-radius:10px;padding:9px 15px;cursor:pointer}button:disabled{opacity:.6}button[aria-pressed=true],button[type=submit]{background:#783ea0;color:white}section,details,article{padding:16px;background:#1d1229;border:1px solid #4c315d;border-radius:12px;margin:12px 0}article{background:#24192f}article h3{margin:0}article p{white-space:pre-line;overflow-wrap:anywhere}form{display:grid;gap:12px;margin:12px 0}label{display:grid;gap:4px}input,textarea,select{background:#130d1b;border:1px solid #684b79;border-radius:8px;padding:10px;color:inherit;font:inherit;width:100%}fieldset{border:1px solid #4c315d}fieldset label{display:flex;align-items:center}fieldset input{width:auto}summary{cursor:pointer}#status{color:#ebc9ff}#status:empty{display:none}[hidden]{display:none!important}
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101322"><title>Painel • Louvor Connect ADVE</title><style>
+:root {
+  color-scheme: dark;
+  font: 16px/1.5 system-ui, sans-serif;
+  background: #101322;
+  color: #f5f3ff;
+  --surface: #191e31;
+  --raised: #222840;
+  --border: #424b68;
+  --muted: #bec6df;
+  --accent: #d5c5ff;
+  --primary: #6745ae;
+}
+* { box-sizing: border-box; }
+body { max-width: 1050px; margin: auto; padding: clamp(14px, 4vw, 32px); }
+header, nav, .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header img { width: 44px; border-radius: 12px; }
+header a { margin-left: auto; }
+h1 { font-size: clamp(1rem, 4vw, 1.4rem); margin: 0; }
+h2 { font-size: 1.35rem; margin: 0 0 12px; }
+h3 { font-size: 1rem; margin: 0; }
+nav { margin: 24px 0 16px; gap: 8px; }
+button, a { font: inherit; color: var(--accent); }
+button {
+  background: var(--raised); border: 1px solid var(--border); border-radius: 10px;
+  min-height: 44px; padding: 8px 14px; cursor: pointer;
+}
+button:disabled { opacity: .65; cursor: default; }
+button[aria-pressed="true"], button[type="submit"], .primary {
+  background: var(--primary); color: white; border-color: #a788e2;
+}
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+section, details, article {
+  padding: clamp(14px, 3vw, 22px); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; margin: 12px 0;
+}
+article, details { background: var(--raised); }
+article p { white-space: pre-line; overflow-wrap: anywhere; }
+form { display: grid; gap: 12px; margin: 12px 0; }
+label { display: grid; gap: 4px; }
+input, textarea, select {
+  background: #101322; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; color: inherit; font: inherit; width: 100%;
+}
+fieldset { border: 1px solid var(--border); min-width: 0; border-radius: 8px; }
+fieldset label { display: flex; align-items: center; }
+fieldset input { width: auto; }
+summary { cursor: pointer; }
+#status { color: var(--accent); }
+#status:empty, [hidden] { display: none !important; }
+.overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.overview-grid button { text-align: left; padding: 12px; overflow-wrap: anywhere; }
+.overview-grid strong { display: block; color: #f5f3ff; font-size: 1.35rem; }
+.overview-next { background: linear-gradient(125deg, #30244a, var(--raised)); }
+.overview-next p { color: var(--muted); margin: 4px 0 12px; }
+@media (max-width: 400px) {
+  nav button { flex: 1 1 auto; }
+  .overview-grid button { padding: 8px; font-size: .875rem; }
+}
 </style></head><body>
 <header><img alt="" src="./icon-192.png"><h1>Louvor Connect ADVE</h1><a href="./login.html">Minha conta</a></header>
 <p id="status" role="status">Carregando o painel…</p>
-<main id="app" hidden><nav aria-label="Seções"><button data-tab="scales">Escalas</button><button data-tab="songs">Repertório</button><button data-tab="members" class="leader" hidden>Integrantes</button><button data-tab="chat">Chat do culto</button><button data-tab="profile">Meu cadastro</button></nav>
+<main id="app" hidden><nav aria-label="Seções"><button data-tab="overview" class="leader" hidden>Visão geral</button><button data-tab="scales">Escalas</button><button data-tab="songs">Repertório</button><button data-tab="members" class="leader" hidden>Integrantes</button><button data-tab="chat">Chat do culto</button><button data-tab="profile">Meu cadastro</button></nav>
+<section id="overview" hidden>
+  <h2>Painel do líder</h2>
+  <article class="overview-next">
+    <h3>Próximo culto ou ensaio</h3>
+    <p id="overviewNext"></p>
+    <button id="overviewScale" type="button" hidden>Ver escala</button>
+  </article>
+  <div class="overview-grid">
+    <button type="button" data-open="scales"><strong id="overviewScales"></strong>Escalas</button>
+    <button type="button" data-open="members"><strong id="overviewMembers"></strong>Integrantes</button>
+    <button type="button" data-open="songs"><strong id="overviewSongs"></strong>Músicas</button>
+  </div>
+  <h3 style="margin-top: 18px">Atalhos</h3>
+  <div class="actions" style="margin-top: 8px">
+    <button class="primary" type="button" id="overviewCreate">Criar escala</button>
+    <button type="button" id="overviewInvite">Convidar integrante</button>
+    <button type="button" id="overviewChat">Chat do culto</button>
+  </div>
+</section>
 <section id="scales"><h2>Escalas</h2><details class="leader" hidden><summary>Criar ou editar escala</summary><form id="scaleForm"><input name="id" type="hidden"><label>Nome do culto ou ensaio<input name="titulo" required maxlength="180"></label><label>Data e hora<input type="datetime-local" name="inicio" required></label><label>Término do culto<input type="datetime-local" name="termino"></label><fieldset><legend>Equipe</legend><div id="teamOptions"></div></fieldset><fieldset><legend>Repertório</legend><div id="songOptions"></div></fieldset><label>Observações<textarea name="notas"></textarea></label><button type="submit">Salvar escala</button><button type="reset">Limpar</button></form></details><div id="scaleList"></div></section>
 <section id="songs" hidden><h2>Repertório</h2><details class="leader" hidden><summary>Cadastrar ou editar música</summary><form id="songForm"><input name="id" type="hidden"><label>Título<input name="titulo" required maxlength="180"></label><label>Artista ou versão<input name="artista"></label><label>Tom<input name="tom"></label><label>Link da cifra<input type="url" name="cifra" pattern="https?://.+"></label><label>Link do áudio da música<input type="url" name="audio" pattern="https?://.+" placeholder="https://..."></label><label>Trecho da música<textarea name="trecho"></textarea></label><label>Observações<textarea name="notas"></textarea></label><button type="submit">Salvar música</button><button type="reset">Limpar</button></form></details><div id="songList"></div></section>
 <section id="chat" hidden><h2>Chat do culto</h2><p>O chat abre no horário de início e fecha no término da escala ou quando o líder finaliza o culto. Depois, o líder pode consultar o histórico.</p><label>Selecione o culto<select id="chatScale"></select></label><div id="chatList" aria-live="polite"></div><form id="chatForm"><label>Mensagem<textarea name="mensagem" required maxlength="1000" rows="3"></textarea></label><button type="submit">Enviar mensagem</button></form></section>
@@ -14,4 +90,4 @@
 </form>
 <form id="inviteForm"><label>E-mail do novo integrante<input name="email" type="email" required></label><button type="submit" name="envio" value="manual">Gerar convite para enviar por e-mail</button><button type="submit" name="envio" value="automatico">Enviar pelo remetente do projeto</button></form><p id="delivery" hidden><a id="compose">Abrir e-mail com o convite</a> · <button id="copyInvite" type="button">Copiar link individual</button></p><div id="teamList"></div></section>
 <section id="profile" hidden><h2>Meu cadastro</h2><form id="profileForm"><label>Nome completo<input name="nome" autocomplete="name" minlength="2" maxlength="120" required></label><label>Telefone com DDD<input type="tel" name="contato" autocomplete="tel" minlength="8" maxlength="25" required></label><label>E-mail da conta<input type="email" name="email_informado" autocomplete="email" required></label><label>Data de nascimento<input type="date" name="nascimento" min="1900-01-01" autocomplete="bday" required></label><button type="submit">Salvar meu cadastro</button></form></section></main>
-<script src="./supabase-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="./painel.js?v=20261120-chamada"></script></body></html>
+<script src="./supabase-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="./painel.js?v=20261121-visao-geral"></script></body></html>
