@@ -24,6 +24,7 @@ function node(tag, value) {
   return el;
 }
 function tab(id) {
+  if (id !== 'songs') document.querySelectorAll('.catalog-player').forEach(player => player.remove());
   for (const button of document.querySelectorAll('[data-tab]')) {
     const active = button.dataset.tab === id && (!button.classList.contains('leader') || leader);
     byId(button.dataset.tab).hidden = !active;
@@ -160,6 +161,13 @@ async function load() {
     if (/^https?:\/\//i.test(song.audio || '')) {
       const audio = node('a','Ouvir música'); audio.href = song.audio;
       audio.target = '_blank'; audio.rel = 'noopener noreferrer'; card.append(audio, node('br'));
+      const id = youtubeId(song.audio);
+      if (id) {
+        const play = node('button', '▶ Ouvir trecho');
+        play.type = 'button';
+        play.onclick = () => showYoutubePlayer(card, id);
+        card.append(play);
+      }
     }
     if (song.trecho) {
       const trecho = node('details');
@@ -444,6 +452,83 @@ submit('inviteForm',async (form, values, button) => {
   }
   form.reset(); return data.message;
 });
+
+function youtubeId(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    const [, route, pathId] = url.pathname.split('/');
+    let id;
+    if (url.hostname === 'youtu.be') id = route;
+    else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(url.hostname)) {
+      if (route === 'watch') id = url.searchParams.get('v');
+      else if (['shorts', 'live', 'embed'].includes(route)) id = pathId;
+    }
+    return /^[\w-]{11}$/.test(id || '') ? id : '';
+  } catch {
+    return '';
+  }
+}
+
+function showYoutubePlayer(container, id) {
+  document.querySelectorAll('.catalog-player').forEach(player => player.remove());
+  const player = node('iframe');
+  player.className = 'catalog-player';
+  player.title = 'Prévia da música no YouTube';
+  player.src = 'https://www.youtube.com/embed/' + id + '?autoplay=1&playsinline=1&end=30&hl=pt-BR';
+  player.allow = 'autoplay; encrypted-media; picture-in-picture';
+  player.allowFullscreen = true;
+  container.append(player);
+}
+
+function initSongCatalog() {
+  const catalog = byId('songCatalog');
+  const search = byId('catalogForm');
+  const video = byId('youtubeForm');
+  const status = byId('catalogStatus');
+  search.onsubmit = event => {
+    event.preventDefault();
+    const term = search.elements.query.value.trim();
+    if (term.length < 2) return;
+    const url = new URL('https://www.youtube.com/results');
+    url.searchParams.set('search_query', term);
+    window.open(url.href, '_blank', 'noopener,noreferrer');
+    status.textContent = 'No YouTube, toque em Compartilhar, copie o link do vídeo e cole aqui.';
+  };
+  const selectedId = () => {
+    const id = youtubeId(video.elements.video.value.trim());
+    status.textContent = id ? '' : 'Cole um link de vídeo válido do YouTube.';
+    return id;
+  };
+  video.onsubmit = event => {
+    event.preventDefault();
+    const id = selectedId();
+    if (!id) return;
+    const results = byId('catalogResults');
+    results.replaceChildren();
+    showYoutubePlayer(results, id);
+    const link = node('a', 'Abrir no YouTube');
+    link.href = 'https://www.youtube.com/watch?v=' + id;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    results.append(link);
+  };
+  byId('useYoutube').onclick = () => {
+    if (!leader) return;
+    const id = selectedId();
+    if (!id) return;
+    const song = byId('songForm');
+    if (!song.elements.titulo.value.trim()) song.elements.titulo.value = search.elements.query.value.trim().slice(0, 180);
+    song.elements.audio.value = 'https://www.youtube.com/watch?v=' + id;
+    catalog.open = false;
+    song.closest('details').open = true;
+    song.elements.titulo.focus();
+  };
+  catalog.addEventListener('toggle', () => {
+    if (!catalog.open) byId('catalogResults').replaceChildren();
+  });
+}
+
 async function start() {
   if (!api) throw Error('Conexão indisponível. Recarregue a página.');
   api.auth.onAuthStateChange((event,session) => {
@@ -458,6 +543,7 @@ async function start() {
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
   if (leader) bindOverview();
+  initSongCatalog();
   const own = await load();
   const refreshChat = () => {
     if (!document.hidden && !byId('chat').hidden) {
