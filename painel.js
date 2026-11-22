@@ -25,11 +25,59 @@ function node(tag, value) {
 }
 function tab(id) {
   for (const button of document.querySelectorAll('[data-tab]')) {
-    const active = button.dataset.tab === id;
+    const active = button.dataset.tab === id && (!button.classList.contains('leader') || leader);
     byId(button.dataset.tab).hidden = !active;
     button.setAttribute('aria-pressed', active);
   }
 }
+function renderOverview() {
+  byId('overviewScales').textContent = scales.length;
+  byId('overviewMembers').textContent = members.length;
+  byId('overviewSongs').textContent = songs.length;
+
+  const now = Date.now();
+  const next = scales.find(scale => !finalizacoes.has(scale.id) && (
+    !cultoIniciado(scale, now) || chatAberto(scale, now)
+  ));
+  const description = byId('overviewNext');
+  const view = byId('overviewScale');
+  description.textContent = next
+    ? next.titulo + ' · ' + new Date(next.inicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+    : 'Nenhum culto ou ensaio agendado.';
+  view.hidden = !next;
+  view.onclick = next ? () => {
+    tab('scales');
+    const heading = byId('scale-' + next.id).querySelector('h3');
+    heading.tabIndex = -1;
+    heading.focus();
+  } : null;
+}
+
+function bindOverview() {
+  document.querySelectorAll('[data-open]').forEach(button => {
+    button.onclick = () => {
+      tab(button.dataset.open);
+      document.querySelector('[data-tab="' + button.dataset.open + '"]').focus();
+    };
+  });
+  byId('overviewCreate').onclick = () => {
+    tab('scales');
+    const form = byId('scaleForm');
+    form.reset();
+    form.closest('details').open = true;
+    form.elements.titulo.focus();
+  };
+  byId('overviewInvite').onclick = () => {
+    tab('members');
+    byId('inviteForm').elements.email.focus();
+  };
+  byId('overviewChat').onclick = () => {
+    const chatTab = document.querySelector('[data-tab="chat"]');
+    chatTab.click();
+    chatTab.focus();
+  };
+}
+
 function choices(id, rows, label, name) {
   const box = byId(id);
   box.replaceChildren();
@@ -123,6 +171,7 @@ async function load() {
   await atualizarFinalizacoes();
   controlesCulto.length = 0;
   cards('scaleList', scales, leader ? 'Nenhuma escala cadastrada.' : 'Você ainda não tem escalas.', (scale, card) => {
+    card.id = 'scale-' + scale.id;
     const date = new Date(scale.inicio);
     const titles = scale.musicas.map(id => songs.find(s => s.id === id)?.titulo).filter(Boolean);
     const names = scale.integrantes.map(id => members.find(m => m.id === id)?.nome_completo).filter(Boolean);
@@ -132,6 +181,7 @@ async function load() {
     editButton(card, () => edit(byId('scaleForm'), { ...scale,
       inicio: localInputValue(scale.inicio), termino: localInputValue(scale.termino) }));
   });
+  if (leader) renderOverview();
   refreshChatChoices();
   return own;
 }
@@ -407,6 +457,7 @@ async function start() {
   leader = Boolean(role.data);
   document.querySelectorAll('.leader').forEach(el => { el.hidden = !leader; });
   document.querySelectorAll('[data-tab]').forEach(el => { el.onclick = () => tab(el.dataset.tab); });
+  if (leader) bindOverview();
   const own = await load();
   const refreshChat = () => {
     if (!document.hidden && !byId('chat').hidden) {
@@ -424,6 +475,7 @@ async function start() {
     try {
       if (finalizacaoDisponivel) await atualizarFinalizacoes();
       for (const atualizar of controlesCulto) atualizar();
+      if (leader && !byId('overview').hidden) renderOverview();
       refreshChat();
     } catch {
       refreshChat();
@@ -431,7 +483,7 @@ async function start() {
       consultandoCulto = false;
     }
   }, 5000);
-  tab(!leader && !own?.data_nascimento ? 'profile' : 'scales');
+  tab(leader ? 'overview' : own?.data_nascimento ? 'scales' : 'profile');
   byId('app').hidden = false;
   notify('');
 }
