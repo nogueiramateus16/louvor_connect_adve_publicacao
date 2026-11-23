@@ -29,3 +29,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Cloudflare wrangler (estado local)
+.wrangler/
