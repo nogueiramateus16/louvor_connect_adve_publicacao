@@ -43,9 +43,9 @@ Fora: ver "Not Doing".
 - **Tema claro**: identidade escura apenas.
 
 ## Open Questions
-1. Horários exatos dos cultos fixos e horários padrão de chegada (passagem de som).
-2. Políticas de notificação padrão por tipo de evento.
-3. Hospedagem de desenvolvimento com HTTPS para testar push em aparelhos reais.
-4. Ambiente de desenvolvimento do banco: Supabase local (Docker) ou um projeto remoto separado.
-5. Abordagem de estilos (proposta: CSS Modules com tokens em CSS custom properties).
-6. O que acontece com o protótipo atual e como será a virada de produção.
+1. Horário de chegada padrão (proposta: 60 min antes). Cultos fixos definidos: quarta 18:00, domingo 09:00 e 18:00.
+2. Validar os padrões de notificação (spec de notifications) depois do piloto.
+3. Abordagem de estilos (proposta: CSS Modules com tokens em CSS custom properties).
+4. O que acontece com o protótipo atual e como será a virada de produção.
+
+Resolvidas: ambiente de desenvolvimento e pré-visualização (ver `setup-ambiente.md`).

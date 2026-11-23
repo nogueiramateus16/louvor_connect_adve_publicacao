@@ -24,4 +24,4 @@ Entregar a experiência instalável, rápida e simples de usar no celular. Adoç
 
 ## Open Questions
 - Estilo visual final (referências: Google Agenda Schedule e ChurchTools), a definir na fase de design.
-- Hospedagem de desenvolvimento com HTTPS (proposta: Cloudflare Pages via CLI).
+- Nenhuma pendência de hospedagem: ver `docs/setup-ambiente.md` (desenvolvimento local, pré-visualização HTTPS e testes em aparelho real).

@@ -15,7 +15,7 @@ Dar previsibilidade e memória ao repertório: o que foi tocado, quando, em que 
 - Publicar o repertório dispara notificação aos escalados.
 
 ## Dados
-`musicas`, `setlist_itens` (evento_id, musica_id, ordem, tom, ministro_id, notas). O histórico é derivado de `setlist_itens` de eventos passados, sem tabela própria.
+`musicas`, `setlist_itens` (evento_id, musica_id, ordem, tom, ministro_id, notas). O histórico é derivado de `setlist_itens` de eventos **realizados** (início no passado e status diferente de cancelado), sem tabela própria. Evento cancelado ou arquivado não conta como "tocado".
 
 ## Success Criteria
 - Em um evento, achar e adicionar uma música já tocada em até 3 toques.

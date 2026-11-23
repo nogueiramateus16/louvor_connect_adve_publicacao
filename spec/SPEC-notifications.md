@@ -7,15 +7,45 @@ Garantir que ninguém perca nada: o push é o canal principal, a central de noti
 
 ## Arquitetura
 1. **Gatilhos de evento** (escalado, troca, repertório publicado, cancelamento): inserem em `notificacoes` na mesma transação.
-2. **Lembretes agendados**: `pg_cron` roda a cada poucos minutos, avalia as políticas e materializa lembretes devidos em `notificacoes`. Chave única (destinatário, evento, tipo de lembrete) garante idempotência.
+2. **Lembretes agendados**: `pg_cron` roda a cada 5 minutos, avalia as políticas e materializa lembretes devidos em `notificacoes`. Chave única (destinatário, evento, tipo de lembrete) garante idempotência.
 3. **Dispatcher**: `pg_cron` + `pg_net` chama uma Edge Function que envia os pendentes por Web Push (VAPID), registra o resultado e remove assinaturas com resposta 404/410.
 4. **Central**: toda notificação aparece na caixa de entrada do usuário (lida/não lida), com ou sem push entregue.
 
 ## Políticas
-- Definidas **por tipo de evento** (culto fixo x extra), com prazos configuráveis pelos líderes.
-- Lembretes de integrante (propostas): ao ser escalado; D-3 sem ação; véspera com repertório; 2 h antes com horário de chegada; extras recebem um lembrete a mais.
-- Lembretes de líder: evento incompleto, repertório devido N dias antes, vaga sem pessoa, troca sem aceite, voluntário novo.
-- **Preferências do usuário**: silenciar por categoria; frequência dentro dos limites das políticas.
+Definidas **por tipo de evento** (culto fixo x extra). Os valores abaixo são o **padrão inicial, com tudo habilitado**; líderes podem alterar prazos, frequências e desligar cada regra por tipo de evento. Os padrões são semeados por migration.
+
+### Integrante
+| Regra | Culto fixo | Culto extra / ensaio / evento |
+|---|---|---|
+| Escalado, trocado ou removido | imediato | imediato |
+| Evento cancelado ou remarcado | imediato | imediato |
+| Repertório publicado ou alterado | imediato | imediato |
+| Escala ainda não vista | D-3 e D-1 | D-5, D-3 e D-1 |
+| Resumo da semana | domingo 19:00 | n/a |
+| Véspera, com função e repertório | 19:00 do dia anterior | 19:00 do dia anterior |
+| Lembrete anterior ao evento | n/a | D-7 |
+| Hora de sair / chegada | 1 h antes da chegada | 2 h antes da chegada |
+| Pedido de troca (mesma função, livre) | imediato | imediato |
+| Troca aceita ou sem aceite | imediato | imediato |
+
+### Líder
+| Regra | Culto fixo | Culto extra / ensaio / evento |
+|---|---|---|
+| Evento criado incompleto | 24 h após a criação, se ainda incompleto | 24 h após a criação |
+| Equipe completa devida | D-7 | D-5 |
+| Repertório definido devido | D-4 | D-3 |
+| Pendência persistente | diário até resolver (máx. 3x) | diário até resolver (máx. 3x) |
+| Vaga em aberto | D-2 | D-2 |
+| Escalados que ainda não viram | D-2 | D-3 |
+| "Não posso" registrado | imediato | imediato |
+| Troca sem aceite | 12 h após o pedido (3 h se o evento for em menos de 24 h) | idem |
+| Novo voluntário | imediato | imediato |
+
+### Regras gerais
+- **Horário de silêncio** (padrão 22:00 às 07:00, por usuário): lembretes agendados esperam até o fim do silêncio. Mudanças imediatas com evento em menos de 24 h ignoram o silêncio.
+- **Limite diário**: no máximo 5 pushes por usuário por dia, sem contar mudanças imediatas. O excedente vai só para a central.
+- **Preferências do usuário**: silenciar por categoria (escala, repertório, troca, lembretes) e ajustar o horário de silêncio. Não é possível desligar mudanças imediatas de escala.
+- Quem não tem push ativo recebe tudo na central.
 
 ## iOS e Android
 - iOS: push só funciona com o app na Tela de Início (16.4+); a permissão só pode ser pedida após um toque e, se negada, não volta a ser pedida. O onboarding explica o valor antes de pedir.
@@ -37,4 +67,4 @@ Garantir que ninguém perca nada: o push é o canal principal, a central de noti
 
 ## Open Questions
 - Biblioteca de Web Push no Deno (`@negrel/webpush` ou `@pushforge/builder`): decidir em um spike.
-- Políticas padrão por tipo de evento e frequência máxima diária por usuário.
+- Validar com o uso real os padrões acima (prazos e limite diário) após o piloto.
