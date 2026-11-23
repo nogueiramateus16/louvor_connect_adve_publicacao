@@ -27,4 +27,4 @@ Controlar quem entra no app e o que cada pessoa pode fazer. Cadastro somente por
 - Link mágico: depende 100% do e-mail e abre no navegador errado no iPhone.
 
 ## Open Questions
-- Remetente do e-mail enquanto não houver domínio (Gmail dedicado com senha de app, a validar).
+- Remetente: Resend com subdomínio verificado na Cloudflare (ver `docs/setup-ambiente.md`); trocar o domínio quando a igreja assumir um próprio.

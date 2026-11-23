@@ -67,6 +67,7 @@ if (error) throw new Error('Não foi possível carregar a agenda.')
 ### Boundaries
 - **Always:** RLS habilitada em toda tabela; escritas privilegiadas por RPC `security definer` com `search_path = ''`; migrations em `begin; ... commit;`; validar entrada no banco e na Edge Function.
 - **Ask first:** novas dependências, mudança de schema já aplicado, mudança de política de notificação padrão, qualquer coisa que gere custo.
+- **Always (CORS):** a origem permitida das Edge Functions vem de variável de ambiente (`ALLOWED_ORIGIN`), nunca fixa no código (o protótipo fixou o domínio do GitHub Pages).
 - **Never:** commitar segredos (chave privada VAPID, service role, senha de app); expor dados pessoais de membros em `docs/` e `spec/`; abrir cadastro público.
 
 ## Esboço do modelo de dados
